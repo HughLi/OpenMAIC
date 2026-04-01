@@ -307,7 +307,8 @@ async function parseWithMinerU(
   formData.append('parse_method', 'auto');
   // hybrid-auto-engine: best accuracy, uses VLM for layout understanding (requires GPU)
   // pipeline: basic mode, no VLM, faster but lower quality image extraction
-  formData.append('backend', 'hybrid-auto-engine');
+  // FIX: Use 'pipeline' for CPU-only mode (M1/M2/M3 without GPU)
+  formData.append('backend', 'pipeline');
   formData.append('return_content_list', 'true');
   formData.append('return_images', 'true');
 

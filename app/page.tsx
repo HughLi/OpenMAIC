@@ -46,6 +46,7 @@ import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
+import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
 
 const log = createLogger('Home');
 
@@ -72,10 +73,7 @@ function HomePage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialFormState);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<
-    import('@/lib/types/settings').SettingsSection | undefined
-  >(undefined);
+  const { isOpen: settingsOpen, closeDialog: closeSettings, section: settingsSection, openDialog: openSettings, setSection: setSettingsSection } = useSettingsDialogStore();
 
   // Draft cache for requirement text
   const { cachedValue: cachedRequirement, updateCache: updateRequirementCache } =
@@ -131,6 +129,84 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Draggable toolbar state
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingToolbar, setIsDraggingToolbar] = useState(false);
+  const toolbarDragStart = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+
+  // Draggable toolbar handlers
+  const handleToolbarMouseDown = (e: React.MouseEvent) => {
+    // Don't drag if clicking on buttons or dropdowns
+    if ((e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('[data-drag-handle]')) return;
+    e.preventDefault();
+    setIsDraggingToolbar(true);
+    toolbarDragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      startX: toolbarPos.x,
+      startY: toolbarPos.y,
+    };
+  };
+
+  const handleToolbarTouchStart = (e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('[data-drag-handle]')) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    setIsDraggingToolbar(true);
+    toolbarDragStart.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      startX: toolbarPos.x,
+      startY: toolbarPos.y,
+    };
+  };
+
+  useEffect(() => {
+    if (!isDraggingToolbar) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!toolbarDragStart.current) return;
+      const deltaX = e.clientX - toolbarDragStart.current.x;
+      const deltaY = e.clientY - toolbarDragStart.current.y;
+
+      // Limit movement to keep within viewport
+      const newX = Math.max(-window.innerWidth + 100, Math.min(toolbarDragStart.current.startX + deltaX, window.innerWidth - 16));
+      const newY = Math.max(0, Math.min(toolbarDragStart.current.startY + deltaY, window.innerHeight - 50));
+
+      setToolbarPos({ x: newX, y: newY });
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!toolbarDragStart.current) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - toolbarDragStart.current.x;
+      const deltaY = touch.clientY - toolbarDragStart.current.y;
+
+      const newX = Math.max(-window.innerWidth + 100, Math.min(toolbarDragStart.current.startX + deltaX, window.innerWidth - 16));
+      const newY = Math.max(0, Math.min(toolbarDragStart.current.startY + deltaY, window.innerHeight - 50));
+
+      setToolbarPos({ x: newX, y: newY });
+    };
+
+    const handleEnd = () => {
+      setIsDraggingToolbar(false);
+      toolbarDragStart.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [isDraggingToolbar]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -204,7 +280,7 @@ function HomePage() {
           className="w-[356px] rounded-xl border border-amber-200/60 dark:border-amber-800/40 bg-gradient-to-r from-amber-50 via-white to-amber-50 dark:from-amber-950/60 dark:via-slate-900 dark:to-amber-950/60 shadow-lg shadow-amber-500/8 dark:shadow-amber-900/20 p-4 flex items-start gap-3 cursor-pointer"
           onClick={() => {
             toast.dismiss(id);
-            setSettingsOpen(true);
+            openSettings('providers');
           }}
         >
           <div className="shrink-0 mt-0.5 size-9 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center ring-1 ring-amber-200/50 dark:ring-amber-800/30">
@@ -235,7 +311,7 @@ function HomePage() {
         t('settings.modelNotConfigured'),
         t('settings.setupNeeded'),
       );
-      setSettingsOpen(true);
+      openSettings('providers');
       return;
     }
 
@@ -321,10 +397,20 @@ function HomePage() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center p-4 pt-16 md:p-8 md:pt-16 overflow-x-hidden">
-      {/* ═══ Top-right pill (unchanged) ═══ */}
+      {/* ═══ Draggable Top-right pill ═══ */}
       <div
         ref={toolbarRef}
-        className="fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm"
+        data-drag-handle
+        onMouseDown={handleToolbarMouseDown}
+        onTouchStart={handleToolbarTouchStart}
+        className={cn(
+          "fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm select-none",
+          isDraggingToolbar ? "cursor-grabbing scale-105" : "cursor-grab"
+        )}
+        style={{
+          transform: `translate(${toolbarPos.x}px, ${toolbarPos.y}px)`,
+          transition: isDraggingToolbar ? "none" : "transform 0.1s ease-out",
+        }}
       >
         {/* Language Selector */}
         <div className="relative">
@@ -335,7 +421,8 @@ function HomePage() {
             }}
             className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
           >
-            {locale === 'zh-CN' ? 'CN' : 'EN'}
+            <span className="sm:hidden">{locale === 'zh-CN' ? '中' : 'EN'}</span>
+            <span className="hidden sm:inline">{locale === 'zh-CN' ? 'CN' : 'EN'}</span>
           </button>
           {languageOpen && (
             <div className="absolute top-full mt-2 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50 min-w-[120px]">
@@ -437,7 +524,7 @@ function HomePage() {
         {/* Settings Button */}
         <div className="relative">
           <button
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => openSettings(undefined)}
             className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
           >
             <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
@@ -447,8 +534,7 @@ function HomePage() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={(open) => {
-          setSettingsOpen(open);
-          if (!open) setSettingsSection(undefined);
+          if (!open) closeSettings();
         }}
         initialSection={settingsSection}
       />
@@ -537,7 +623,7 @@ function HomePage() {
                   onWebSearchChange={(v) => updateForm('webSearch', v)}
                   onSettingsOpen={(section) => {
                     setSettingsSection(section);
-                    setSettingsOpen(true);
+                    openSettings('providers');
                   }}
                   pdfFile={form.pdfFile}
                   onPdfFileChange={(f) => updateForm('pdfFile', f)}

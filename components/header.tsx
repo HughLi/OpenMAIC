@@ -10,6 +10,7 @@ import {
   Download,
   FileDown,
   Package,
+  Video,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useTheme } from '@/lib/hooks/use-theme';
@@ -20,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store/stage';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useExportPPTX } from '@/lib/export/use-export-pptx';
+import { useExportVideo } from '@/lib/export/use-export-video';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
@@ -35,6 +37,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
 
   // Export
   const { exporting: isExporting, exportPPTX, exportResourcePack } = useExportPPTX();
+  const { exporting: isExportingVideo, exportVideo } = useExportVideo();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const scenes = useStageStore((s) => s.scenes);
@@ -47,6 +50,8 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     generatingOutlines.length === 0 &&
     failedOutlines.length === 0 &&
     Object.values(mediaTasks).every((task) => task.status === 'done' || task.status === 'failed');
+
+  const isAnyExporting = isExporting || isExportingVideo;
 
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
@@ -222,24 +227,24 @@ export function Header({ currentSceneTitle }: HeaderProps) {
         <div className="relative" ref={exportRef}>
           <button
             onClick={() => {
-              if (canExport && !isExporting) setExportMenuOpen(!exportMenuOpen);
+              if (canExport && !isAnyExporting) setExportMenuOpen(!exportMenuOpen);
             }}
-            disabled={!canExport || isExporting}
+            disabled={!canExport || isAnyExporting}
             title={
               canExport
-                ? isExporting
+                ? isAnyExporting
                   ? t('export.exporting')
                   : t('export.pptx')
                 : t('share.notReady')
             }
             className={cn(
               'shrink-0 p-2 rounded-full transition-all',
-              canExport && !isExporting
+              canExport && !isAnyExporting
                 ? 'text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm'
                 : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50',
             )}
           >
-            {isExporting ? (
+            {isAnyExporting ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Download className="w-4 h-4" />
@@ -256,6 +261,21 @@ export function Header({ currentSceneTitle }: HeaderProps) {
               >
                 <FileDown className="w-4 h-4 text-gray-400 shrink-0" />
                 <span>{t('export.pptx')}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setExportMenuOpen(false);
+                  exportVideo();
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2.5"
+              >
+                <Video className="w-4 h-4 text-gray-400 shrink-0" />
+                <div>
+                  <div>{t('export.video') || '导出视频'}</div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {t('export.videoDesc') || 'PPT + TTS 音频合成视频'}
+                  </div>
+                </div>
               </button>
               <button
                 onClick={() => {
