@@ -26,6 +26,7 @@ import {
   replaceMediaPlaceholders,
   generateTTSForClassroom,
 } from '@/lib/server/classroom-media-generation';
+import { saveClassroomMetadata } from '@/lib/server/classroom-service';
 import type { UserRequirements } from '@/lib/types/generation';
 import type { Scene, Stage } from '@/lib/types/stage';
 
@@ -162,11 +163,13 @@ Return a JSON object with this exact structure:
 export async function generateClassroom(
   input: GenerateClassroomInput,
   options: {
+    ownerId: string;
     baseUrl: string;
     onProgress?: (progress: ClassroomGenerationProgress) => Promise<void> | void;
   },
 ): Promise<GenerateClassroomResult> {
   const { requirement, pdfContent } = input;
+  const { ownerId } = options;
 
   await options.onProgress?.({
     step: 'initializing',
@@ -415,6 +418,17 @@ export async function generateClassroom(
     },
     options.baseUrl,
   );
+
+  // Save metadata to database for course listing
+  saveClassroomMetadata({
+    id: stageId,
+    ownerId,
+    title: stage.name,
+    description: stage.description,
+    category: 'other',
+    visibility: 'private',
+    sceneCount: scenes.length,
+  });
 
   log.info(`Classroom persisted: ${persisted.id}, URL: ${persisted.url}`);
 

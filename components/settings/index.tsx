@@ -26,6 +26,8 @@ import {
   Search,
   Volume2,
   Mic,
+  ChevronLeft,
+  Menu,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -72,7 +74,7 @@ function ProviderListColumn<T extends string>({
   configs: Record<string, { isServerConfigured?: boolean }>;
   selectedId: T;
   onSelect: (id: T) => void;
-  width: number;
+  width: number | string;
   t: (key: string) => string;
 }) {
   return (
@@ -237,7 +239,35 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
   // Save status indicator
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
-  // Resizable column widths
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMobileNav, setShowMobileNav] = useState(false);
+  const [mobileView, setMobileView] = useState<'menu' | 'list' | 'content'>('menu');
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      if (window.innerWidth >= 768) {
+        setShowMobileNav(false);
+        setMobileView('content');
+      } else {
+        setMobileView('menu');
+      }
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Reset mobile view when section changes
+  useEffect(() => {
+    if (isMobile) {
+      const hasProviderList = ['providers', 'pdf', 'web-search', 'image', 'video', 'tts', 'asr'].includes(activeSection);
+      setMobileView(hasProviderList ? 'list' : 'content');
+    }
+  }, [activeSection, isMobile]);
+
+  // Resizable column widths (desktop only)
   const [sidebarWidth, setSidebarWidth] = useState(192);
   const [providerListWidth, setProviderListWidth] = useState(192);
   const [isResizing, setIsResizing] = useState(false);
@@ -664,183 +694,286 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[85vh] p-0 gap-0 block" showCloseButton={false}>
+      <DialogContent
+        className={cn(
+          'p-0 gap-0 block overflow-hidden',
+          isMobile ? 'h-screen w-screen max-w-none rounded-none' : 'h-[85vh]'
+        )}
+        showCloseButton={false}
+      >
         <DialogTitle className="sr-only">{t('settings.title')}</DialogTitle>
         <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
+
+        {/* Mobile Navigation Header */}
+        {isMobile && (
+          <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {mobileView !== 'menu' && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => {
+                    if (mobileView === 'content') {
+                      const hasProviderList = ['providers', 'pdf', 'web-search', 'image', 'video', 'tts', 'asr'].includes(activeSection);
+                      setMobileView(hasProviderList ? 'list' : 'menu');
+                    } else if (mobileView === 'list') {
+                      setMobileView('menu');
+                    }
+                  }}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+              )}
+              <span className="font-semibold truncate">
+                {mobileView === 'menu' && t('settings.title')}
+                {mobileView === 'list' && t('settings.selectProvider')}
+                {mobileView === 'content' && activeSection === 'general' && t('settings.systemSettings')}
+                {mobileView === 'content' && activeSection === 'providers' && selectedProvider?.name}
+                {mobileView === 'content' && activeSection === 'pdf' && PDF_PROVIDERS[selectedPdfProviderId]?.name}
+                {mobileView === 'content' && activeSection === 'web-search' && WEB_SEARCH_PROVIDERS[selectedWebSearchProviderId]?.name}
+                {mobileView === 'content' && activeSection === 'image' && (t(`settings.${IMAGE_PROVIDER_NAMES[selectedImageProviderId]}`) || IMAGE_PROVIDERS[selectedImageProviderId]?.name)}
+                {mobileView === 'content' && activeSection === 'video' && (t(`settings.${VIDEO_PROVIDER_NAMES[selectedVideoProviderId]}`) || VIDEO_PROVIDERS[selectedVideoProviderId]?.name)}
+                {mobileView === 'content' && activeSection === 'tts' && getTTSProviderName(ttsProviderId, t)}
+                {mobileView === 'content' && activeSection === 'asr' && getASRProviderName(asrProviderId, t)}
+              </span>
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => onOpenChange(false)}>
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+        )}
+
         <div className="flex h-full overflow-hidden">
-          {/* Left Sidebar - Navigation */}
-          <div className="flex-shrink-0 bg-muted/30 p-3 space-y-1" style={{ width: sidebarWidth }}>
-            <button
-              onClick={() => setActiveSection('providers')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'providers'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Box className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.providers')}</span>
-            </button>
+          {/* Left Sidebar - Navigation (Desktop or Mobile Menu View) */}
+          {(!isMobile || mobileView === 'menu') && (
+            <>
+              <div
+                className="flex-shrink-0 bg-muted/30 p-3 space-y-1"
+                style={{ width: isMobile ? '100%' : sidebarWidth }}
+              >
+                <button
+                  onClick={() => {
+                    setActiveSection('providers');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'providers'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Box className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.providers')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('image')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'image'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <ImageIcon className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.imageSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('image');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'image'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <ImageIcon className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.imageSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('video')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'video'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Film className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.videoSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('video');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'video'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Film className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.videoSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('tts')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'tts'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Volume2 className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.ttsSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('tts');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'tts'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Volume2 className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.ttsSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('asr')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'asr'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Mic className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.asrSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('asr');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'asr'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Mic className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.asrSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('pdf')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'pdf'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <FileText className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.pdfSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('pdf');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'pdf'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <FileText className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.pdfSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('web-search')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'web-search'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Search className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.webSearchSettings')}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveSection('web-search');
+                    if (isMobile) setMobileView('list');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'web-search'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Search className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.webSearchSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
 
-            <button
-              onClick={() => setActiveSection('general')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-left min-w-0',
-                activeSection === 'general'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'hover:bg-muted',
-              )}
-            >
-              <Settings className="h-4 w-4 shrink-0" />
-              <span className="truncate">{t('settings.systemSettings')}</span>
-            </button>
-          </div>
+                <button
+                  onClick={() => {
+                    setActiveSection('general');
+                    if (isMobile) setMobileView('content');
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-3 text-sm rounded-lg transition-colors text-left min-w-0',
+                    activeSection === 'general'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted'
+                  )}
+                >
+                  <Settings className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{t('settings.systemSettings')}</span>
+                  {isMobile && <ChevronLeft className="h-4 w-4 ml-auto rotate-180" />}
+                </button>
+              </div>
 
-          {/* Sidebar resize handle */}
-          <div
-            onMouseDown={(e) => handleResizeStart(e, 'sidebar')}
-            className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-          >
-            <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-          </div>
+              {/* Sidebar resize handle (desktop only) */}
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'sidebar')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
+            </>
+          )}
 
           {/* Middle - Provider List (only shown for provider-based sections) */}
-          {activeSection === 'providers' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'providers' && (
             <>
               <ProviderList
                 providers={allProviders}
                 selectedProviderId={selectedProviderId}
-                onSelect={handleProviderSelect}
+                onSelect={(pid) => {
+                  handleProviderSelect(pid);
+                  if (isMobile) setMobileView('content');
+                }}
                 onAddProvider={() => setShowAddProviderDialog(true)}
-                width={providerListWidth}
+                width={isMobile ? '100%' : providerListWidth}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'pdf' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'pdf' && (
             <>
               <ProviderListColumn
                 providers={Object.values(PDF_PROVIDERS)}
                 configs={pdfProvidersConfig}
                 selectedId={selectedPdfProviderId}
-                onSelect={setSelectedPdfProviderId}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setSelectedPdfProviderId(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'web-search' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'web-search' && (
             <>
               <ProviderListColumn
                 providers={Object.values(WEB_SEARCH_PROVIDERS)}
                 configs={webSearchProvidersConfig}
                 selectedId={selectedWebSearchProviderId}
-                onSelect={setSelectedWebSearchProviderId}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setSelectedWebSearchProviderId(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'image' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'image' && (
             <>
               <ProviderListColumn
                 providers={Object.values(IMAGE_PROVIDERS).map((p) => ({
@@ -850,20 +983,25 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
                 }))}
                 configs={imageProvidersConfig}
                 selectedId={selectedImageProviderId}
-                onSelect={setSelectedImageProviderId}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setSelectedImageProviderId(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'video' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'video' && (
             <>
               <ProviderListColumn
                 providers={Object.values(VIDEO_PROVIDERS).map((p) => ({
@@ -873,20 +1011,25 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
                 }))}
                 configs={videoProvidersConfig}
                 selectedId={selectedVideoProviderId}
-                onSelect={setSelectedVideoProviderId}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setSelectedVideoProviderId(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'tts' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'tts' && (
             <>
               <ProviderListColumn
                 providers={Object.values(TTS_PROVIDERS).map((p) => ({
@@ -896,20 +1039,25 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
                 }))}
                 configs={ttsProvidersConfig}
                 selectedId={ttsProviderId}
-                onSelect={setTTSProvider}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setTTSProvider(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'asr' && (
+          {(!isMobile || mobileView === 'list') && activeSection === 'asr' && (
             <>
               <ProviderListColumn
                 providers={Object.values(ASR_PROVIDERS).map((p) => ({
@@ -919,106 +1067,141 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
                 }))}
                 configs={asrProvidersConfig}
                 selectedId={asrProviderId}
-                onSelect={setASRProvider}
-                width={providerListWidth}
+                onSelect={(id) => {
+                  setASRProvider(id);
+                  if (isMobile) setMobileView('content');
+                }}
+                width={isMobile ? '100%' : providerListWidth}
                 t={t}
               />
-              <div
-                onMouseDown={(e) => handleResizeStart(e, 'providerList')}
-                className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
-              >
-                <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
-              </div>
+              {!isMobile && (
+                <div
+                  onMouseDown={(e) => handleResizeStart(e, 'providerList')}
+                  className="flex-shrink-0 w-[5px] cursor-col-resize group flex justify-center"
+                >
+                  <div className="w-px h-full bg-border group-hover:bg-primary/50 transition-colors" />
+                </div>
+              )}
             </>
           )}
 
           {/* Right - Configuration Panel */}
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b">
-              <div className="flex items-center gap-3">{getHeaderContent()}</div>
-              <div className="flex items-center gap-2">
-                {activeSection === 'providers' &&
-                  !providersConfig[selectedProviderId]?.isBuiltIn && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-destructive hover:text-destructive"
-                      onClick={() => handleDeleteProvider(selectedProviderId)}
-                    >
-                      <Trash2 className="h-4 w-4" />
+          {(!isMobile || mobileView === 'content') && (
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              {/* Header (desktop only) */}
+              {!isMobile && (
+                <div className="flex items-center justify-between p-5 border-b">
+                  <div className="flex items-center gap-3">{getHeaderContent()}</div>
+                  <div className="flex items-center gap-2">
+                    {activeSection === 'providers' &&
+                      !providersConfig[selectedProviderId]?.isBuiltIn && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteProvider(selectedProviderId)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+                      <X className="h-4 w-4" />
                     </Button>
-                  )}
-                <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
-                  <X className="h-4 w-4" />
-                </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-5">
+                {activeSection === 'general' && <GeneralSettings />}
+
+                {activeSection === 'providers' && selectedProvider && (
+                  <ProviderConfigPanel
+                    provider={selectedProvider}
+                    initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
+                    initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
+                    initialRequiresApiKey={
+                      providersConfig[selectedProviderId]?.requiresApiKey ?? true
+                    }
+                    providersConfig={providersConfig}
+                    onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
+                      handleProviderConfigChange(selectedProviderId, apiKey, baseUrl, requiresApiKey)
+                    }
+                    onSave={handleProviderConfigSave}
+                    onEditModel={(index) => handleEditModel(selectedProviderId, index)}
+                    onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
+                    onAddModel={handleAddModel}
+                    onResetToDefault={() => handleResetProvider(selectedProviderId)}
+                    isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
+                  />
+                )}
+
+                {activeSection === 'pdf' && (
+                  <PDFSettings selectedProviderId={selectedPdfProviderId} />
+                )}
+                {activeSection === 'web-search' && (
+                  <WebSearchSettings selectedProviderId={selectedWebSearchProviderId} />
+                )}
+                {activeSection === 'image' && (
+                  <ImageSettings selectedProviderId={selectedImageProviderId} />
+                )}
+                {activeSection === 'video' && (
+                  <VideoSettings selectedProviderId={selectedVideoProviderId} />
+                )}
+                {activeSection === 'tts' && <TTSSettings selectedProviderId={ttsProviderId} />}
+                {activeSection === 'asr' && <ASRSettings selectedProviderId={asrProviderId} />}
               </div>
-            </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-5">
-              {activeSection === 'general' && <GeneralSettings />}
-
-              {activeSection === 'providers' && selectedProvider && (
-                <ProviderConfigPanel
-                  provider={selectedProvider}
-                  initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
-                  initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
-                  initialRequiresApiKey={
-                    providersConfig[selectedProviderId]?.requiresApiKey ?? true
-                  }
-                  providersConfig={providersConfig}
-                  onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
-                    handleProviderConfigChange(selectedProviderId, apiKey, baseUrl, requiresApiKey)
-                  }
-                  onSave={handleProviderConfigSave}
-                  onEditModel={(index) => handleEditModel(selectedProviderId, index)}
-                  onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
-                  onAddModel={handleAddModel}
-                  onResetToDefault={() => handleResetProvider(selectedProviderId)}
-                  isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
-                />
-              )}
-
-              {activeSection === 'pdf' && (
-                <PDFSettings selectedProviderId={selectedPdfProviderId} />
-              )}
-              {activeSection === 'web-search' && (
-                <WebSearchSettings selectedProviderId={selectedWebSearchProviderId} />
-              )}
-              {activeSection === 'image' && (
-                <ImageSettings selectedProviderId={selectedImageProviderId} />
-              )}
-              {activeSection === 'video' && (
-                <VideoSettings selectedProviderId={selectedVideoProviderId} />
-              )}
-              {activeSection === 'tts' && <TTSSettings selectedProviderId={ttsProviderId} />}
-              {activeSection === 'asr' && <ASRSettings selectedProviderId={asrProviderId} />}
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-end gap-3 px-5 py-3 border-t bg-muted/30">
-              {saveStatus === 'saved' && (
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>{t('settings.saveSuccess')}</span>
+              {/* Footer (desktop only, mobile has bottom nav) */}
+              {!isMobile && (
+                <div className="flex items-center justify-end gap-3 px-5 py-3 border-t bg-muted/30">
+                  {saveStatus === 'saved' && (
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>{t('settings.saveSuccess')}</span>
+                    </div>
+                  )}
+                  {saveStatus === 'error' && (
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <XCircle className="h-4 w-4" />
+                      <span>{t('settings.saveFailed')}</span>
+                    </div>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                    {t('settings.close')}
+                  </Button>
+                  <Button size="sm" onClick={handleSave}>
+                    {t('settings.save')}
+                  </Button>
                 </div>
               )}
-              {saveStatus === 'error' && (
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <XCircle className="h-4 w-4" />
-                  <span>{t('settings.saveFailed')}</span>
-                </div>
-              )}
-              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-                {t('settings.close')}
-              </Button>
-              <Button size="sm" onClick={handleSave}>
-                {t('settings.save')}
-              </Button>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* Mobile Bottom Navigation */}
+        {isMobile && mobileView === 'content' && (
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t bg-muted/30">
+            {saveStatus === 'saved' && (
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground mr-auto">
+                <CheckCircle2 className="h-4 w-4" />
+                <span>{t('settings.saveSuccess')}</span>
+              </div>
+            )}
+            {saveStatus === 'error' && (
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground mr-auto">
+                <XCircle className="h-4 w-4" />
+                <span>{t('settings.saveFailed')}</span>
+              </div>
+            )}
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              {t('settings.close')}
+            </Button>
+            <Button size="sm" onClick={handleSave}>
+              {t('settings.save')}
+            </Button>
+          </div>
+        )}
       </DialogContent>
 
       {/* Edit Model Dialog */}

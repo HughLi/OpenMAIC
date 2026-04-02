@@ -11,6 +11,7 @@ import {
   canAccessClassroom,
   deleteClassroom,
   listUserClassrooms,
+  updateClassroom,
 } from '@/lib/server/classroom-service';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
 
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
       baseUrl
     );
 
-    // Save metadata to database
+    // Save metadata to database with storage path
     saveClassroomMetadata({
       id,
       ownerId: auth.userId,
@@ -68,6 +69,8 @@ export async function POST(request: NextRequest) {
       description: stage.description,
       visibility,
       sceneCount: scenes.length,
+      storagePath: persisted.storagePath,
+      syncStatus: 'local',
     });
 
     return apiSuccess({ id: persisted.id, url: persisted.url }, 201);
@@ -104,12 +107,13 @@ export async function GET(request: NextRequest) {
       return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
     }
 
-    const classroom = await readClassroom(id);
+    const metadata = getClassroomMetadata(id);
+
+    // Read classroom with ownerId for new path structure
+    const classroom = await readClassroom(id, metadata?.ownerId);
     if (!classroom) {
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
     }
-
-    const metadata = getClassroomMetadata(id);
 
     return apiSuccess({
       classroom,
@@ -164,6 +168,79 @@ export async function DELETE(request: NextRequest) {
       API_ERROR_CODES.INTERNAL_ERROR,
       500,
       'Failed to delete classroom',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+// PATCH /api/classroom - Update classroom metadata (owner or admin only)
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof Response) return auth;
+
+  try {
+    const id = request.nextUrl.searchParams.get('id');
+
+    if (!id) {
+      return apiError(API_ERROR_CODES.MISSING_REQUIRED_FIELD, 400, 'Missing classroom id');
+    }
+
+    if (!isValidClassroomId(id)) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid classroom id');
+    }
+
+    // Get metadata to check ownership
+    const metadata = getClassroomMetadata(id);
+    if (!metadata) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
+    }
+
+    // Only owner or admin can update
+    if (metadata.ownerId !== auth.userId && auth.role !== 'admin') {
+      return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
+    }
+
+    const body = await request.json();
+    const { title, description, category, coverImage, visibility } = body;
+
+    // Validate visibility if provided
+    if (visibility && !['private', 'public', 'shared'].includes(visibility)) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid visibility value');
+    }
+
+    // Update metadata
+    const updates: {
+      title?: string;
+      description?: string;
+      category?: string;
+      coverImage?: string;
+      visibility?: 'private' | 'public' | 'shared';
+    } = {};
+
+    if (title !== undefined) updates.title = title;
+    if (description !== undefined) updates.description = description;
+    if (category !== undefined) updates.category = category;
+    if (coverImage !== undefined) updates.coverImage = coverImage;
+    if (visibility !== undefined) updates.visibility = visibility;
+
+    const success = updateClassroom(id, auth.userId, updates);
+
+    if (!success) {
+      return apiError(API_ERROR_CODES.INTERNAL_ERROR, 500, 'Failed to update classroom');
+    }
+
+    // Get updated metadata
+    const updatedMetadata = getClassroomMetadata(id);
+
+    return apiSuccess({
+      message: 'Classroom updated successfully',
+      classroom: updatedMetadata,
+    });
+  } catch (error) {
+    return apiError(
+      API_ERROR_CODES.INTERNAL_ERROR,
+      500,
+      'Failed to update classroom',
       error instanceof Error ? error.message : String(error),
     );
   }

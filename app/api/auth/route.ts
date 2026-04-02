@@ -21,7 +21,7 @@ interface DbUser {
   email: string;
   password_hash: string;
   role: UserRole;
-  status: 'active' | 'inactive' | 'pending';
+  status: 'pending_approval' | 'active' | 'inactive' | 'rejected';
   display_name: string | null;
 }
 
@@ -69,8 +69,20 @@ export async function GET(request: NextRequest) {
       'SELECT id, username, email, role, display_name, status FROM users WHERE id = ?'
     ).get(payload.userId) as DbUser | undefined;
 
-    if (!user || user.status !== 'active') {
-      return apiError('USER_NOT_FOUND', 404, 'User not found or inactive');
+    if (!user) {
+      return apiError('USER_NOT_FOUND', 404, 'User not found');
+    }
+
+    if (user.status === 'pending_approval') {
+      return apiError('PENDING_APPROVAL', 403, '账号正在等待管理员审批');
+    }
+
+    if (user.status === 'rejected') {
+      return apiError('ACCOUNT_REJECTED', 403, '注册申请已被拒绝');
+    }
+
+    if (user.status === 'inactive') {
+      return apiError('ACCOUNT_FROZEN', 403, '账号已被冻结');
     }
 
     return apiSuccess({
@@ -104,8 +116,17 @@ async function handleLogin({ username, password }: { username: string; password:
     return apiError('INVALID_CREDENTIALS', 401, 'Invalid username or password');
   }
 
-  if (user.status !== 'active') {
-    return apiError('FORBIDDEN', 403, 'Account is not active');
+  // Check user status and return specific error messages
+  if (user.status === 'pending_approval') {
+    return apiError('PENDING_APPROVAL', 403, '账号正在等待管理员审批，请耐心等待');
+  }
+
+  if (user.status === 'rejected') {
+    return apiError('ACCOUNT_REJECTED', 403, '注册申请已被拒绝，如有疑问请联系管理员');
+  }
+
+  if (user.status === 'inactive') {
+    return apiError('ACCOUNT_FROZEN', 403, '账号已被冻结，请联系管理员');
   }
 
   const validPassword = await verifyPassword(password, user.password_hash);
@@ -132,16 +153,38 @@ async function handleLogin({ username, password }: { username: string; password:
   });
 }
 
+// Helper function to create notification for all admins
+function notifyAdmins(db: ReturnType<typeof getDatabase>, title: string, content: string, type: string, data?: object) {
+  const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all() as { id: string }[];
+  const insertNotification = db.prepare(`
+    INSERT INTO notifications (id, user_id, type, title, content, data)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const admin of admins) {
+    insertNotification.run(
+      uuidv4(),
+      admin.id,
+      type,
+      title,
+      content,
+      data ? JSON.stringify(data) : null
+    );
+  }
+}
+
 async function handleRegister({
   username,
   email,
   password,
   displayName,
+  role,
 }: {
   username: string;
   email: string;
   password: string;
   displayName?: string;
+  role?: UserRole;
 }) {
   if (!username || !email || !password) {
     return apiError('MISSING_REQUIRED_FIELD', 400, 'Username, email, and password are required');
@@ -162,6 +205,9 @@ async function handleRegister({
     return apiError('INVALID_REQUEST', 400, 'Password must be at least 6 characters');
   }
 
+  // Validate role
+  const userRole: UserRole = role === 'generator' ? 'generator' : 'viewer';
+
   const db = getDatabase();
 
   // Check if username exists
@@ -176,23 +222,32 @@ async function handleRegister({
   const passwordHash = await hashPassword(password);
   const userId = uuidv4();
 
-  // New registrations are viewers by default, pending admin approval for generator
+  // New registrations are pending approval
   db.prepare(`
     INSERT INTO users (id, username, email, password_hash, role, display_name, status)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(userId, username, email, passwordHash, 'viewer', displayName || username, 'active');
+  `).run(userId, username, email, passwordHash, userRole, displayName || username, 'pending_approval');
 
-  const tokens = await generateTokenPair(userId, username, 'viewer');
+  // Send notification to all admins
+  const roleText = userRole === 'generator' ? '教师/创作者' : '学生/学习者';
+  notifyAdmins(
+    db,
+    '新用户注册申请',
+    `用户 "${displayName || username}" (${username}) 申请注册为${roleText}，请前往管理后台审批。`,
+    'approval',
+    { userId, username, role: userRole, type: 'new_registration' }
+  );
 
   return apiSuccess({
+    message: '注册申请已提交，请等待管理员审批',
     user: {
       id: userId,
       username,
       email,
-      role: 'viewer' as UserRole,
+      role: userRole,
       displayName: displayName || username,
+      status: 'pending_approval',
     },
-    tokens,
   });
 }
 

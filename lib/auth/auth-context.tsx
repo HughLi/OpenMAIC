@@ -23,7 +23,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, email: string, password: string, displayName?: string) => Promise<void>;
+  register: (username: string, email: string, password: string, displayName?: string, role?: UserRole) => Promise<void>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
   hasRole: (role: UserRole | UserRole[]) => boolean;
@@ -95,7 +95,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     username: string,
     email: string,
     password: string,
-    displayName?: string
+    displayName?: string,
+    role?: UserRole
   ) => {
     const response = await fetch(`${API_BASE}/auth`, {
       method: 'POST',
@@ -106,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email,
         password,
         displayName,
+        role,
       }),
     });
 
@@ -115,8 +117,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(data.error || 'Registration failed');
     }
 
-    storeTokens(data.tokens);
-    setUser(data.user);
+    // Registration successful, but user needs approval
+    // Don't auto-login, just return success
+    // storeTokens and setUser are not called here
   }, []);
 
   const logout = useCallback(async () => {

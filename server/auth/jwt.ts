@@ -5,7 +5,7 @@ import { getDatabase } from '../database';
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'openmaic-dev-secret-change-in-production'
 );
-const ACCESS_TOKEN_EXPIRY = '15m';
+const ACCESS_TOKEN_EXPIRY = '7d';
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
 export type UserRole = 'admin' | 'generator' | 'viewer';
@@ -66,7 +66,7 @@ export async function generateTokenPair(userId: string, username: string, role: 
   return {
     accessToken,
     refreshToken,
-    expiresIn: 15 * 60 // 15 minutes in seconds
+    expiresIn: 7 * 24 * 60 * 60 // 7 days in seconds
   };
 }
 

@@ -12,6 +12,7 @@ const runningJobs = new Map<string, Promise<void>>();
 
 export function runClassroomGenerationJob(
   jobId: string,
+  ownerId: string,
   input: GenerateClassroomInput,
   baseUrl: string,
 ): Promise<void> {
@@ -25,6 +26,7 @@ export function runClassroomGenerationJob(
       await markClassroomGenerationJobRunning(jobId);
 
       const result = await generateClassroom(input, {
+        ownerId,
         baseUrl,
         onProgress: async (progress) => {
           await updateClassroomGenerationJobProgress(jobId, progress);

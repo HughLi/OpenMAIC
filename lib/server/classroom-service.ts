@@ -2,12 +2,33 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import type { NextRequest } from 'next/server';
 import type { Scene, Stage } from '@/lib/types/stage';
+import type { Slide } from '@/lib/types/slides';
 import { getDatabase } from '@/server/database';
 
 // Storage directories
+// New structure: data/classrooms/{owner_id}/{stage_id}/
 export const CLASSROOMS_DIR = path.join(process.cwd(), 'data', 'classrooms');
 export const CLASSROOM_MEDIA_DIR = path.join(process.cwd(), 'data', 'classrooms', 'media');
 export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
+
+/**
+ * Get classroom storage path with user isolation
+ * Structure: data/classrooms/{owner_id}/{stage_id}/
+ */
+export function getClassroomPath(
+  ownerId: string,
+  stageId: string,
+  subPath?: 'media' | 'scenes'
+): string {
+  const basePath = path.join(CLASSROOMS_DIR, ownerId, stageId);
+  if (subPath === 'media') {
+    return path.join(basePath, 'media');
+  }
+  if (subPath === 'scenes') {
+    return path.join(basePath, 'scenes.json');
+  }
+  return path.join(basePath, 'stage.json');
+}
 
 // Ensure directories exist
 async function ensureDir(dir: string) {
@@ -58,12 +79,16 @@ export interface ClassroomMetadata {
   ownerId: string;
   title: string;
   description: string | null;
+  category: string;
+  coverImage: string | null;
   visibility: 'private' | 'public' | 'shared';
   status: 'active' | 'archived' | 'deleted';
   sceneCount: number;
   createdAt: string;
   updatedAt: string;
   expiresAt: string | null;
+  storagePath?: string | null;
+  syncStatus?: 'local' | 'syncing' | 'synced' | 'error';
 }
 
 export interface MediaFile {
@@ -85,10 +110,29 @@ export function isValidClassroomId(id: string): boolean {
 }
 
 // Read classroom data from file system
-export async function readClassroom(id: string): Promise<PersistedClassroomData | null> {
-  const filePath = path.join(CLASSROOMS_DIR, `${id}.json`);
+// Supports both new user-isolated paths and legacy paths for backward compatibility
+export async function readClassroom(
+  id: string,
+  ownerId?: string
+): Promise<PersistedClassroomData | null> {
+  // Try new user-isolated path first if ownerId provided
+  if (ownerId) {
+    const filePath = getClassroomPath(ownerId, id);
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content) as PersistedClassroomData;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      // Fall through to try legacy path
+    }
+  }
+
+  // Try legacy path (for backward compatibility)
+  const legacyPath = path.join(CLASSROOMS_DIR, `${id}.json`);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
+    const content = await fs.readFile(legacyPath, 'utf-8');
     return JSON.parse(content) as PersistedClassroomData;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -98,7 +142,33 @@ export async function readClassroom(id: string): Promise<PersistedClassroomData 
   }
 }
 
+// Get first slide from classroom (for thumbnail)
+export async function getClassroomFirstSlide(id: string): Promise<Slide | null> {
+  try {
+    const classroom = await readClassroom(id);
+    if (!classroom || !classroom.scenes || classroom.scenes.length === 0) {
+      return null;
+    }
+
+    // Find first slide scene
+    const firstSlideScene = classroom.scenes.find(
+      (scene): scene is Scene & { content: { type: 'slide'; canvas: Slide } } =>
+        scene.type === 'slide' && scene.content?.type === 'slide'
+    );
+
+    if (!firstSlideScene) {
+      return null;
+    }
+
+    return firstSlideScene.content.canvas;
+  } catch (error) {
+    // Silently return null on error
+    return null;
+  }
+}
+
 // Persist classroom data to file system
+// Uses user-isolated paths when ownerId is provided
 export async function persistClassroom(
   data: {
     id: string;
@@ -107,7 +177,7 @@ export async function persistClassroom(
     ownerId?: string;
   },
   baseUrl: string,
-): Promise<PersistedClassroomData & { url: string }> {
+): Promise<PersistedClassroomData & { url: string; storagePath: string }> {
   const classroomData: PersistedClassroomData = {
     id: data.id,
     stage: data.stage,
@@ -116,13 +186,22 @@ export async function persistClassroom(
     ownerId: data.ownerId,
   };
 
-  await ensureClassroomsDir();
-  const filePath = path.join(CLASSROOMS_DIR, `${data.id}.json`);
+  // Use user-isolated path if ownerId is provided, otherwise fall back to legacy path
+  const filePath = data.ownerId
+    ? getClassroomPath(data.ownerId, data.id)
+    : path.join(CLASSROOMS_DIR, `${data.id}.json`);
+
   await writeJsonFileAtomic(filePath, classroomData);
+
+  // Calculate relative storage path for database
+  const storagePath = data.ownerId
+    ? path.join('classrooms', data.ownerId, data.id, 'stage.json')
+    : path.join('classrooms', `${data.id}.json`);
 
   return {
     ...classroomData,
     url: `${baseUrl}/classroom/${data.id}`,
+    storagePath,
   };
 }
 
@@ -251,30 +330,44 @@ export function saveClassroomMetadata(metadata: {
   ownerId: string;
   title: string;
   description?: string;
+  category?: string;
+  coverImage?: string;
   visibility?: 'private' | 'public' | 'shared';
   sceneCount: number;
   expiresAt?: string;
+  storagePath?: string;
+  syncStatus?: 'local' | 'syncing' | 'synced' | 'error';
 }): void {
   const db = getDatabase();
 
   db.prepare(`
-    INSERT INTO classrooms (id, owner_id, title, description, visibility, scene_count, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO classrooms (id, owner_id, title, description, category, cover_image, visibility, status, scene_count, expires_at, storage_path, sync_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       description = excluded.description,
+      category = excluded.category,
+      cover_image = excluded.cover_image,
       visibility = excluded.visibility,
+      status = excluded.status,
       scene_count = excluded.scene_count,
       updated_at = datetime('now'),
-      expires_at = excluded.expires_at
+      expires_at = excluded.expires_at,
+      storage_path = COALESCE(excluded.storage_path, storage_path),
+      sync_status = COALESCE(excluded.sync_status, sync_status)
   `).run(
     metadata.id,
     metadata.ownerId,
     metadata.title,
     metadata.description || null,
+    metadata.category || 'other',
+    metadata.coverImage || null,
     metadata.visibility || 'private',
+    'active',
     metadata.sceneCount,
-    metadata.expiresAt || null
+    metadata.expiresAt || null,
+    metadata.storagePath || null,
+    metadata.syncStatus || 'local'
   );
 }
 
@@ -282,19 +375,23 @@ export function saveClassroomMetadata(metadata: {
 export function getClassroomMetadata(id: string): ClassroomMetadata | null {
   const db = getDatabase();
   const classroom = db.prepare(`
-    SELECT id, owner_id, title, description, visibility, status, scene_count, created_at, updated_at, expires_at
+    SELECT id, owner_id, title, description, category, cover_image, visibility, status, scene_count, created_at, updated_at, expires_at, storage_path, sync_status
     FROM classrooms WHERE id = ?
   `).get(id) as {
     id: string;
     owner_id: string;
     title: string;
     description: string | null;
+    category: string;
+    cover_image: string | null;
     visibility: 'private' | 'public' | 'shared';
     status: 'active' | 'archived' | 'deleted';
     scene_count: number;
     created_at: string;
     updated_at: string;
     expires_at: string | null;
+    storage_path: string | null;
+    sync_status: 'local' | 'syncing' | 'synced' | 'error';
   } | undefined;
 
   if (!classroom) {
@@ -306,12 +403,16 @@ export function getClassroomMetadata(id: string): ClassroomMetadata | null {
     ownerId: classroom.owner_id,
     title: classroom.title,
     description: classroom.description,
+    category: classroom.category,
+    coverImage: classroom.cover_image,
     visibility: classroom.visibility,
     status: classroom.status,
     sceneCount: classroom.scene_count,
     createdAt: classroom.created_at,
     updatedAt: classroom.updated_at,
     expiresAt: classroom.expires_at,
+    storagePath: classroom.storage_path,
+    syncStatus: classroom.sync_status,
   };
 }
 
@@ -319,7 +420,7 @@ export function getClassroomMetadata(id: string): ClassroomMetadata | null {
 export function listUserClassrooms(userId: string): ClassroomMetadata[] {
   const db = getDatabase();
   const classrooms = db.prepare(`
-    SELECT id, owner_id, title, description, visibility, status, scene_count, created_at, updated_at, expires_at
+    SELECT id, owner_id, title, description, category, cover_image, visibility, status, scene_count, created_at, updated_at, expires_at, storage_path, sync_status
     FROM classrooms WHERE owner_id = ? AND status = 'active'
     ORDER BY updated_at DESC
   `).all(userId) as Array<{
@@ -327,12 +428,16 @@ export function listUserClassrooms(userId: string): ClassroomMetadata[] {
     owner_id: string;
     title: string;
     description: string | null;
+    category: string;
+    cover_image: string | null;
     visibility: 'private' | 'public' | 'shared';
     status: 'active' | 'archived' | 'deleted';
     scene_count: number;
     created_at: string;
     updated_at: string;
     expires_at: string | null;
+    storage_path: string | null;
+    sync_status: 'local' | 'syncing' | 'synced' | 'error';
   }>;
 
   return classrooms.map(c => ({
@@ -340,12 +445,16 @@ export function listUserClassrooms(userId: string): ClassroomMetadata[] {
     ownerId: c.owner_id,
     title: c.title,
     description: c.description,
+    category: c.category,
+    coverImage: c.cover_image,
     visibility: c.visibility,
     status: c.status,
     sceneCount: c.scene_count,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
     expiresAt: c.expires_at,
+    storagePath: c.storage_path,
+    syncStatus: c.sync_status,
   }));
 }
 
@@ -417,10 +526,14 @@ export function updateClassroom(
   updates: {
     title?: string;
     description?: string;
+    category?: string;
+    coverImage?: string | null;
     visibility?: 'private' | 'public' | 'shared';
     status?: 'active' | 'archived' | 'deleted';
     sceneCount?: number;
     metadata?: string;
+    storagePath?: string | null;
+    syncStatus?: 'local' | 'syncing' | 'synced' | 'error';
   }
 ): boolean {
   const db = getDatabase();
@@ -436,6 +549,14 @@ export function updateClassroom(
     fields.push('description = ?');
     values.push(updates.description);
   }
+  if (updates.category !== undefined) {
+    fields.push('category = ?');
+    values.push(updates.category);
+  }
+  if (updates.coverImage !== undefined) {
+    fields.push('cover_image = ?');
+    values.push(updates.coverImage);
+  }
   if (updates.visibility !== undefined) {
     fields.push('visibility = ?');
     values.push(updates.visibility);
@@ -447,6 +568,14 @@ export function updateClassroom(
   if (updates.sceneCount !== undefined) {
     fields.push('scene_count = ?');
     values.push(updates.sceneCount);
+  }
+  if (updates.storagePath !== undefined) {
+    fields.push('storage_path = ?');
+    values.push(updates.storagePath);
+  }
+  if (updates.syncStatus !== undefined) {
+    fields.push('sync_status = ?');
+    values.push(updates.syncStatus);
   }
 
   fields.push("updated_at = datetime('now')");
@@ -543,6 +672,8 @@ export async function createClassroom(
     ownerId,
     title: data.name,
     description: data.description || null,
+    category: 'other',
+    coverImage: null,
     visibility: 'private',
     status: 'active',
     sceneCount: 0,
@@ -613,6 +744,9 @@ export const classroomService = {
   ensureClassroomsDir,
   ensureClassroomMediaDir,
   ensureClassroomJobsDir,
+
+  // Path helpers
+  getClassroomPath,
 
   // CRUD operations
   createClassroom,

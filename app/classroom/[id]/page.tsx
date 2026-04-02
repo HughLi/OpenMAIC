@@ -12,6 +12,7 @@ import { useWhiteboardHistoryStore } from '@/lib/store/whiteboard-history';
 import { createLogger } from '@/lib/logger';
 import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
+import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
 
 const log = createLogger('Classroom');
 
@@ -25,10 +26,43 @@ export default function ClassroomDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const generationStartedRef = useRef(false);
+  const syncedToDatabaseRef = useRef(false);
+
+  // Use new classroom sync hook
+  const { syncClassroom, syncStatus, isSyncing } = useClassroomSync();
 
   const { generateRemaining, retrySingleOutline, stop } = useSceneGenerator({
-    onComplete: () => {
+    onComplete: async () => {
       log.info('[Classroom] All scenes generated');
+
+      // Sync complete classroom data to database for recent learning tracking
+      if (syncedToDatabaseRef.current) return;
+      syncedToDatabaseRef.current = true;
+
+      try {
+        const state = useStageStore.getState();
+        const { stage, scenes } = state;
+
+        if (!stage) {
+          log.warn('[Classroom] Cannot sync to database: stage is null');
+          return;
+        }
+
+        // Use new sync hook to sync complete classroom data
+        const result = await syncClassroom({
+          stage,
+          scenes,
+          ownerId: 'anonymous', // TODO: Get actual user ID from auth context
+        });
+
+        if (result.success) {
+          log.info('[Classroom] Successfully synced to database:', stage.id, 'URL:', result.url);
+        } else {
+          log.warn('[Classroom] Failed to sync to database:', result.error);
+        }
+      } catch (syncErr) {
+        log.warn('[Classroom] Failed to sync to database:', syncErr);
+      }
     },
   });
 

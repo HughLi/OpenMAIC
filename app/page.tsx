@@ -47,6 +47,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
+import { useUserClassrooms } from '@/lib/hooks/use-user-classrooms';
 
 const log = createLogger('Home');
 
@@ -82,6 +83,9 @@ function HomePage() {
   // Model setup state
   const currentModelId = useSettingsStore((s) => s.modelId);
   const [recentOpen, setRecentOpen] = useState(true);
+
+  // User classrooms from database
+  const { classrooms: userClassrooms, isLoading: classroomsLoading, refetch: refetchClassrooms } = useUserClassrooms({ limit: 20 });
 
   // Hydrate client-only state after mount (avoids SSR mismatch)
   /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect */
@@ -222,18 +226,29 @@ function HomePage() {
   }, [languageOpen, themeOpen]);
 
   const loadClassrooms = async () => {
-    try {
-      const list = await listStages();
-      setClassrooms(list);
-      // Load first slide thumbnails
-      if (list.length > 0) {
-        const slides = await getFirstSlideByStages(list.map((c) => c.id));
-        setThumbnails(slides);
-      }
-    } catch (err) {
-      log.error('Failed to load classrooms:', err);
-    }
+    // Now using useUserClassrooms hook which fetches from database
+    // This function is kept for backward compatibility with refresh logic
+    await refetchClassrooms();
   };
+
+  // Load thumbnails when classrooms change
+  useEffect(() => {
+    if (userClassrooms.length === 0) {
+      setThumbnails({});
+      return;
+    }
+
+    const loadThumbnails = async () => {
+      try {
+        const slides = await getFirstSlideByStages(userClassrooms.map((c) => c.id));
+        setThumbnails(slides);
+      } catch (err) {
+        log.error('Failed to load thumbnails:', err);
+      }
+    };
+
+    loadThumbnails();
+  }, [userClassrooms]);
 
   useEffect(() => {
     // Clear stale media store to prevent cross-course thumbnail contamination.
@@ -558,7 +573,7 @@ function HomePage() {
         transition={{ duration: 0.6, ease: 'easeOut' }}
         className={cn(
           'relative z-20 w-full max-w-[800px] flex flex-col items-center',
-          classrooms.length === 0 ? 'justify-center min-h-[calc(100dvh-8rem)]' : 'mt-[10vh]',
+          userClassrooms.length === 0 ? 'justify-center min-h-[calc(100dvh-8rem)]' : 'mt-[10vh]',
         )}
       >
         {/* ── Logo ── */}
@@ -677,7 +692,7 @@ function HomePage() {
       </motion.div>
 
       {/* ═══ Recent classrooms — collapsible ═══ */}
-      {classrooms.length > 0 && (
+      {userClassrooms.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -701,7 +716,7 @@ function HomePage() {
             <span className="shrink-0 flex items-center gap-2 text-[13px] text-muted-foreground/60 group-hover:text-foreground/70 transition-colors select-none">
               <Clock className="size-3.5" />
               {t('classroom.recentClassrooms')}
-              <span className="text-[11px] tabular-nums opacity-60">{classrooms.length}</span>
+              <span className="text-[11px] tabular-nums opacity-60">{userClassrooms.length}</span>
               <motion.div
                 animate={{ rotate: recentOpen ? 180 : 0 }}
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
@@ -723,7 +738,7 @@ function HomePage() {
                 className="w-full overflow-hidden"
               >
                 <div className="pt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-8">
-                  {classrooms.map((classroom, i) => (
+                  {userClassrooms.map((classroom, i) => (
                     <motion.div
                       key={classroom.id}
                       initial={{ opacity: 0, y: 16 }}

@@ -15,7 +15,7 @@ interface ProviderListProps {
   selectedProviderId: ProviderId;
   onSelect: (providerId: ProviderId) => void;
   onAddProvider: () => void;
-  width?: number;
+  width?: number | string;
 }
 
 export function ProviderList({

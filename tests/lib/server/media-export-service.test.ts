@@ -158,7 +158,7 @@ describe('MediaExportService', () => {
         {
           id: 'img_1',
           blob: Buffer.from('test-content'),
-          type: 'image',
+          type: 'image' as const,
           mimeType: 'image/png',
         },
       ];
@@ -185,7 +185,7 @@ describe('MediaExportService', () => {
         {
           id: 'img_1',
           blob: Buffer.from('data'),
-          type: 'image',
+          type: 'image' as const,
           mimeType: 'image/png',
         },
       ];

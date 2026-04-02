@@ -16,6 +16,7 @@ export type ClassroomGenerationJobStatus = 'queued' | 'running' | 'succeeded' | 
 
 export interface ClassroomGenerationJob {
   id: string;
+  ownerId: string; // User who created the job
   status: ClassroomGenerationJobStatus;
   step: ClassroomGenerationStep | 'queued' | 'failed';
   progress: number;
@@ -101,11 +102,13 @@ export function isValidClassroomJobId(jobId: string): boolean {
 
 export async function createClassroomGenerationJob(
   jobId: string,
+  ownerId: string,
   input: GenerateClassroomInput,
 ): Promise<ClassroomGenerationJob> {
   const now = new Date().toISOString();
   const job: ClassroomGenerationJob = {
     id: jobId,
+    ownerId,
     status: 'queued',
     step: 'queued',
     progress: 0,
