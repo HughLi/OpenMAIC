@@ -47,7 +47,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
-import { useUserClassrooms } from '@/lib/hooks/use-user-classrooms';
+import { useUserClassroomsSync } from '@/lib/hooks/use-user-classrooms-sync';
 
 const log = createLogger('Home');
 
@@ -85,7 +85,7 @@ function HomePage() {
   const [recentOpen, setRecentOpen] = useState(true);
 
   // User classrooms from database
-  const { classrooms: userClassrooms, isLoading: classroomsLoading, refetch: refetchClassrooms } = useUserClassrooms({ limit: 20 });
+  const { classrooms: userClassrooms, isLoading: classroomsLoading, refresh: refetchClassrooms } = useUserClassroomsSync({ limit: 20 });
 
   // Hydrate client-only state after mount (avoids SSR mismatch)
   /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect */
