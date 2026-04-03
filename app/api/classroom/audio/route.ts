@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server';
 import { apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
-import { getClassroomMetadata, canAccessClassroom } from '@/lib/server/classroom-service';
+import { getClassroomMetadata, canAccessClassroom, getClassroomPath } from '@/lib/server/classroom-service';
 import { createReadStream } from 'fs';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -57,22 +57,44 @@ export async function GET(request: NextRequest) {
       return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
     }
 
-    // Find audio file
-    const audioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
+    // Get metadata to find ownerId for new path structure
+    const metadata = getClassroomMetadata(classroomId);
+    const ownerId = metadata?.ownerId;
+
+    // Find audio file - try new path first, then legacy path
     const extensions = ['mp3', 'wav', 'ogg', 'm4a'];
     let filePath: string | null = null;
     let fileExt = 'mp3';
 
-    for (const ext of extensions) {
-      const testPath = path.join(audioDir, `${audioId}.${ext}`);
-      if (existsSync(testPath)) {
-        filePath = testPath;
-        fileExt = ext;
-        break;
+    // Try new path structure: data/classrooms/{ownerId}/{classroomId}/audio/
+    if (ownerId) {
+      const newAudioDir = getClassroomPath(ownerId, classroomId);
+      const audioDir = path.join(path.dirname(newAudioDir), 'audio');
+      for (const ext of extensions) {
+        const testPath = path.join(audioDir, `${audioId}.${ext}`);
+        if (existsSync(testPath)) {
+          filePath = testPath;
+          fileExt = ext;
+          break;
+        }
+      }
+    }
+
+    // Try legacy path: data/classrooms/{classroomId}/audio/
+    if (!filePath) {
+      const legacyAudioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
+      for (const ext of extensions) {
+        const testPath = path.join(legacyAudioDir, `${audioId}.${ext}`);
+        if (existsSync(testPath)) {
+          filePath = testPath;
+          fileExt = ext;
+          break;
+        }
       }
     }
 
     if (!filePath) {
+      log.warn(`Audio file not found: ${classroomId}/${audioId}`);
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Audio file not found');
     }
 
