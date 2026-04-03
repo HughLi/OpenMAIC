@@ -75,7 +75,7 @@ export function CourseCard({ course, viewMode }: CourseCardProps) {
         ref={thumbRef}
         className={cn(
           'relative overflow-hidden bg-slate-100 dark:bg-slate-800/80',
-          isGrid ? 'w-full aspect-video' : 'w-48 h-32 shrink-0'
+          isGrid ? 'w-full aspect-[16/10]' : 'w-36 h-24 shrink-0'
         )}
       >
         {hasThumbnail ? (
@@ -106,60 +106,62 @@ export function CourseCard({ course, viewMode }: CourseCardProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-4 flex flex-col">
-        <h3 className="font-semibold text-lg mb-1 line-clamp-1 group-hover:text-[#722ed1] transition-colors">
+      <div className="flex-1 p-3 flex flex-col">
+        <h3 className="font-medium text-sm mb-1 line-clamp-2 group-hover:text-[#722ed1] transition-colors leading-tight">
           {course.title}
         </h3>
 
         {/* Instructor */}
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-1.5 mb-1.5">
           {course.instructor.avatar ? (
             <Image
               src={course.instructor.avatar}
               alt={course.instructor.name}
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               className="rounded-full"
             />
           ) : (
-            <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-xs">
+            <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px]">
               {course.instructor.name.charAt(0)}
             </div>
           )}
-          <span className="text-sm text-muted-foreground">{course.instructor.name}</span>
+          <span className="text-xs text-muted-foreground truncate max-w-[80px]">{course.instructor.name}</span>
         </div>
 
-        {/* Description - Only in list view or when grid has space */}
-        <p className="text-sm text-muted-foreground line-clamp-2 mb-3 flex-1">
-          {course.description}
-        </p>
+        {/* Description - Hidden in grid view for compactness */}
+        {!isGrid && (
+          <p className="text-xs text-muted-foreground line-clamp-1 mb-2">
+            {course.description}
+          </p>
+        )}
 
         {/* Stats & Progress */}
-        <div className="space-y-2">
+        <div className={cn("space-y-1.5", isGrid && "mt-auto")}>
           {/* Rating & Students */}
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-1">
-              <Star data-testid="star-icon" className="w-4 h-4 fill-amber-400 text-amber-400" />
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-0.5">
+              <Star data-testid="star-icon" className="w-3 h-3 fill-amber-400 text-amber-400" />
               <span className="font-medium">{course.rating}</span>
             </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Users className="w-4 h-4" />
-              <span>{course.studentCount} 学员</span>
+            <div className="flex items-center gap-0.5 text-muted-foreground">
+              <Users className="w-3 h-3" />
+              <span>{course.studentCount}</span>
             </div>
           </div>
 
           {/* Progress Bar */}
           {course.progress !== undefined && (
             <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>学习进度</span>
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>进度</span>
                 <span>{course.progress}%</span>
               </div>
               <Progress
                 value={course.progress}
                 aria-label="学习进度"
                 aria-valuenow={course.progress}
-                className="h-1.5"
+                className="h-1"
               />
             </div>
           )}
@@ -384,9 +386,9 @@ export default function CourseListPage() {
           ) : filteredCourses.length > 0 ? (
             <div
               className={cn(
-                'grid gap-4',
+                'grid gap-3',
                 viewMode === 'grid'
-                  ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+                  ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
                   : 'grid-cols-1'
               )}
             >

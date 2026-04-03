@@ -2,6 +2,58 @@ import { type NextRequest } from 'next/server';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { getDatabase } from '@/server/database';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
+import { readFile } from 'fs/promises';
+import path from 'path';
+import { CLASSROOMS_DIR } from '@/lib/server/classroom-service';
+
+// Helper function to extract cover image from classroom JSON file
+async function getClassroomCoverImage(ownerId: string, classroomId: string): Promise<string | null> {
+  try {
+    // Try new path structure first
+    const filePath = path.join(CLASSROOMS_DIR, ownerId, classroomId, 'stage.json');
+    const content = await readFile(filePath, 'utf-8');
+    const data = JSON.parse(content);
+
+    // Try to get first scene's image
+    if (data.scenes && data.scenes.length > 0) {
+      const firstScene = data.scenes[0];
+      const content = firstScene.content as { canvas?: { elements?: Array<{ type: string; src?: string }> } } | undefined;
+      if (content?.canvas?.elements) {
+        const imageElement = content.canvas.elements.find(
+          (el) => el.type === 'image' && el.src
+        );
+        if (imageElement?.src) {
+          return imageElement.src;
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    // Try legacy path
+    try {
+      const legacyPath = path.join(CLASSROOMS_DIR, `${classroomId}.json`);
+      const content = await readFile(legacyPath, 'utf-8');
+      const data = JSON.parse(content);
+
+      if (data.scenes && data.scenes.length > 0) {
+        const firstScene = data.scenes[0];
+        const content = firstScene.content as { canvas?: { elements?: Array<{ type: string; src?: string }> } } | undefined;
+        if (content?.canvas?.elements) {
+          const imageElement = content.canvas.elements.find(
+            (el) => el.type === 'image' && el.src
+          );
+          if (imageElement?.src) {
+            return imageElement.src;
+          }
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+    return null;
+  }
+}
 
 // Auth middleware - requires admin role
 async function requireAdmin(request: NextRequest): Promise<AccessTokenPayload | Response> {
@@ -83,26 +135,36 @@ export async function GET(request: NextRequest) {
       owner_name: string;
     }>;
 
-    // Transform to Course format
-    const courses = classrooms.map(classroom => ({
-      id: classroom.id,
-      title: classroom.title,
-      description: classroom.description || '',
-      coverImage: classroom.cover_image || '',
-      category: classroom.category,
-      instructor: {
-        id: classroom.owner_id,
-        name: classroom.owner_name || 'Unknown',
-        avatar: '',
-      },
-      rating: 4.5, // TODO: Implement rating system
-      studentCount: 0, // TODO: Implement enrollment tracking
-      status: classroom.status as 'active' | 'inactive' | 'draft',
-      createdAt: classroom.created_at,
-      updatedAt: classroom.updated_at,
-      sceneCount: classroom.scene_count,
-      visibility: classroom.visibility,
-    }));
+    // Transform to Course format with cover images
+    const courses = await Promise.all(
+      classrooms.map(async (classroom) => {
+        // Get cover image from JSON file if not in database
+        let coverImage = classroom.cover_image || '';
+        if (!coverImage) {
+          coverImage = await getClassroomCoverImage(classroom.owner_id, classroom.id) || '';
+        }
+
+        return {
+          id: classroom.id,
+          title: classroom.title,
+          description: classroom.description || '',
+          coverImage,
+          category: classroom.category,
+          instructor: {
+            id: classroom.owner_id,
+            name: classroom.owner_name || 'Unknown',
+            avatar: '',
+          },
+          rating: 4.5, // TODO: Implement rating system
+          studentCount: 0, // TODO: Implement enrollment tracking
+          status: classroom.status as 'active' | 'inactive' | 'draft',
+          createdAt: classroom.created_at,
+          updatedAt: classroom.updated_at,
+          sceneCount: classroom.scene_count,
+          visibility: classroom.visibility,
+        };
+      })
+    );
 
     // Get stats (exclude deleted courses)
     const stats = db.prepare(`
