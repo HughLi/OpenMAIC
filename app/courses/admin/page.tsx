@@ -47,6 +47,7 @@ import { useAdminCourses, deleteCourse, updateCourse, type Course } from '@/lib/
 import { useAdminCategories } from '@/lib/hooks/use-categories';
 import { UserManagement } from './components/user-management';
 import { CourseImportMenu } from '../components/course-import-menu';
+import { ThumbnailSlide } from '@/components/slide-renderer/components/ThumbnailSlide';
 import {
   Dialog,
   DialogContent,
@@ -624,7 +625,14 @@ export default function AdminDashboardPage({
                             <TableCell>
                               <div className="flex items-center gap-4">
                                 <div className="relative w-20 h-14 rounded-lg bg-gradient-to-br from-[#722ed1]/20 to-purple-300/20 flex items-center justify-center shrink-0 overflow-hidden">
-                                  {course.coverImage ? (
+                                  {course.firstSlide ? (
+                                    <ThumbnailSlide
+                                      slide={course.firstSlide}
+                                      size={80}
+                                      viewportSize={course.firstSlide.viewportSize ?? 1000}
+                                      viewportRatio={course.firstSlide.viewportRatio ?? 0.5625}
+                                    />
+                                  ) : course.coverImage ? (
                                     <Image
                                       src={course.coverImage}
                                       alt={course.title}
