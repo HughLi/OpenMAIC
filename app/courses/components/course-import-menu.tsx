@@ -41,6 +41,8 @@ import { listStages, loadStageData } from '@/lib/utils/stage-storage';
 import { db } from '@/lib/utils/database';
 import type { SpeechAction } from '@/lib/types/action';
 import { createLogger } from '@/lib/logger';
+import type { Slide } from '@/lib/types/slides';
+import { ThumbnailSlide } from '@/components/slide-renderer/components/ThumbnailSlide';
 
 const log = createLogger('CourseImport');
 
@@ -56,7 +58,7 @@ interface DiscoveredCourse {
   name: string;
   description?: string;
   sceneCount: number;
-  coverImage?: string;
+  firstSlide?: Slide;
   source: 'indexeddb' | 'localstorage';
   data?: unknown;
 }
@@ -124,7 +126,7 @@ export function CourseImportMenu({
                     name: item.name || item.title || '未命名课程',
                     description: item.description,
                     sceneCount: item.scenes?.length || item.slides?.length || 0,
-                    coverImage: item.coverImage,
+                    firstSlide: undefined,
                     source: 'localstorage',
                     data: item,
                   });
@@ -136,7 +138,7 @@ export function CourseImportMenu({
                 name: parsed.name || parsed.title || '未命名课程',
                 description: parsed.description,
                 sceneCount: parsed.scenes?.length || parsed.slides?.length || 0,
-                coverImage: parsed.coverImage,
+                firstSlide: undefined,
                 source: 'localstorage',
                 data: parsed,
               });
@@ -168,28 +170,22 @@ export function CourseImportMenu({
         return;
       }
 
-      // Create discovered courses list with cover images
+      // Create discovered courses list with first slide for thumbnails
       const discovered: DiscoveredCourse[] = await Promise.all(
         stages.map(async (stage) => {
-          // Try to load first scene to get cover image
-          let coverImage: string | undefined;
+          // Try to load first scene to get first slide
+          let firstSlide: Slide | undefined;
           try {
             const stageData = await loadStageData(stage.id);
             if (stageData?.scenes && stageData.scenes.length > 0) {
               const firstScene = stageData.scenes[0];
-              // Try to extract image from scene content
-              const content = firstScene.content as { canvas?: { elements?: Array<{ type: string; src?: string }> } } | undefined;
-              if (content?.canvas?.elements) {
-                const imageElement = content.canvas.elements.find(
-                  (el) => el.type === 'image' && el.src
-                );
-                if (imageElement?.src) {
-                  coverImage = imageElement.src;
-                }
+              // Get the slide content if it's a slide type
+              if (firstScene.type === 'slide' && firstScene.content?.type === 'slide') {
+                firstSlide = firstScene.content.canvas;
               }
             }
           } catch {
-            // Ignore errors, just won't have cover image
+            // Ignore errors, just won't have first slide
           }
 
           return {
@@ -197,7 +193,7 @@ export function CourseImportMenu({
             name: stage.name,
             description: stage.description,
             sceneCount: stage.sceneCount,
-            coverImage,
+            firstSlide,
             source: 'indexeddb' as const,
           };
         })
@@ -584,7 +580,7 @@ export function CourseImportMenu({
       </DropdownMenu>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[480px] p-0 flex flex-col max-h-[85vh]">
+        <DialogContent className="sm:max-w-[480px] p-0 flex flex-col max-h-[85vh] overflow-hidden rounded-lg">
           <DialogHeader className="space-y-1 px-4 pt-4 pb-3 border-b flex-shrink-0">
             <DialogTitle className="text-base">{getDialogTitle()}</DialogTitle>
             <DialogDescription className="text-xs">{getDialogDescription()}</DialogDescription>
@@ -645,21 +641,14 @@ export function CourseImportMenu({
                             onCheckedChange={() => toggleCourseSelection(course.id)}
                             className="flex-shrink-0 h-4 w-4"
                           />
-                          {/* Cover Image */}
+                          {/* Cover Image - First Slide Thumbnail */}
                           <div className="flex-shrink-0 w-10 h-10 rounded-md bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center">
-                            {course.coverImage ? (
-                              <img
-                                src={course.coverImage}
-                                alt=""
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  target.style.display = 'none';
-                                  const parent = target.parentElement;
-                                  if (parent) {
-                                    parent.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
-                                  }
-                                }}
+                            {course.firstSlide ? (
+                              <ThumbnailSlide
+                                slide={course.firstSlide}
+                                size={40}
+                                viewportSize={course.firstSlide.viewportSize ?? 1000}
+                                viewportRatio={course.firstSlide.viewportRatio ?? 0.5625}
                               />
                             ) : (
                               <ImageIcon className="w-4 h-4 text-slate-400" />
@@ -746,7 +735,7 @@ export function CourseImportMenu({
           </div>
 
           {/* Action Buttons - Outside scroll area */}
-          <div className="flex justify-end gap-2 px-4 py-3 border-t flex-shrink-0 bg-background">
+          <div className="flex justify-end gap-2 px-4 py-3 border-t flex-shrink-0 bg-background rounded-b-lg">
             <Button
               variant="ghost"
               size="sm"
