@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useRef } from 'react';
 import type { Stage, Scene } from '@/lib/types/stage';
+import type { SpeechAction } from '@/lib/types/action';
+import { db } from '@/lib/utils/database';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('useClassroomSync');
@@ -96,11 +98,18 @@ export function useClassroomSync(): UseClassroomSyncReturn {
 
       setSyncProgress(30);
 
+      // Get auth token
+      const tokenData = localStorage.getItem('openmaic_tokens')
+        ? JSON.parse(localStorage.getItem('openmaic_tokens')!)
+        : null;
+      const token = tokenData?.accessToken;
+
       // Call API to create/update classroom
       const response = await fetch('/api/classroom', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -122,12 +131,12 @@ export function useClassroomSync(): UseClassroomSyncReturn {
       setSyncStatus('synced');
       setLastSyncTime(new Date());
 
-      log.info('Classroom sync completed:', result.data?.id);
+      log.info('Classroom sync completed:', result.id);
 
       return {
         success: true,
-        classroomId: result.data?.id,
-        url: result.data?.url,
+        classroomId: result.id,
+        url: result.url,
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -150,14 +159,30 @@ export function useClassroomSync(): UseClassroomSyncReturn {
       return classroomResult;
     }
 
+    const classroomId = classroomResult.classroomId!;
+
+    // Sync audio files from IndexedDB
+    await syncAudioFiles(input, classroomId);
+
     // Then sync media files if any
     if (input.mediaFiles && input.mediaFiles.length > 0) {
       try {
         log.info(`Syncing ${input.mediaFiles.length} media files`);
         setSyncProgress(80);
 
-        // TODO: Implement media sync via separate API endpoint
-        // For now, media files need to be handled separately
+        // Upload media files
+        for (const mediaFile of input.mediaFiles) {
+          const formData = new FormData();
+          formData.append('classroomId', classroomId);
+          formData.append('mediaId', mediaFile.id);
+          formData.append('media', mediaFile.blob);
+          formData.append('type', mediaFile.type);
+
+          await fetch('/api/classroom/media-upload', {
+            method: 'POST',
+            body: formData,
+          });
+        }
 
         setSyncProgress(100);
       } catch (err) {
@@ -169,6 +194,71 @@ export function useClassroomSync(): UseClassroomSyncReturn {
 
     return classroomResult;
   }, [syncClassroom]);
+
+  // Sync audio files from IndexedDB to server
+  const syncAudioFiles = useCallback(async (input: SyncClassroomInput, classroomId: string): Promise<void> => {
+    try {
+      // Get auth token
+      const tokenData = localStorage.getItem('openmaic_tokens')
+        ? JSON.parse(localStorage.getItem('openmaic_tokens')!)
+        : null;
+      const token = tokenData?.accessToken;
+
+      // Extract audio IDs from speech actions
+      const audioIds: string[] = [];
+      for (const scene of input.scenes || []) {
+        for (const action of scene.actions || []) {
+          if (action.type === 'speech') {
+            const speechAction = action as SpeechAction;
+            if (speechAction.audioId) {
+              audioIds.push(speechAction.audioId);
+            }
+          }
+        }
+      }
+
+      if (audioIds.length === 0) {
+        log.info('No audio files to sync');
+        return;
+      }
+
+      log.info(`Syncing ${audioIds.length} audio files`);
+      setSyncProgress(75);
+
+      // Upload each audio file
+      let uploadedCount = 0;
+      for (const audioId of audioIds) {
+        const audioRecord = await db.audioFiles.get(audioId);
+        if (!audioRecord) {
+          log.warn(`Audio file not found in IndexedDB: ${audioId}`);
+          continue;
+        }
+
+        const formData = new FormData();
+        formData.append('classroomId', classroomId);
+        formData.append('audioId', audioId);
+        formData.append('audio', audioRecord.blob, `${audioId}.${audioRecord.format}`);
+
+        const response = await fetch('/api/classroom/audio-upload', {
+          method: 'POST',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : undefined,
+          body: formData,
+        });
+
+        if (!response.ok) {
+          log.warn(`Failed to upload audio ${audioId}:`, await response.text());
+        } else {
+          uploadedCount++;
+        }
+      }
+
+      log.info(`Audio sync complete: ${uploadedCount}/${audioIds.length} uploaded`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error('Audio sync failed:', errorMessage);
+      // Don't fail the whole sync if audio fails
+    }
+  }, []);
 
   const retrySync = useCallback(async (): Promise<SyncResult> => {
     const lastInput = lastSyncInputRef.current;

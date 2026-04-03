@@ -3,8 +3,13 @@ import path from 'path';
 import type { NextRequest } from 'next/server';
 import type { Scene, Stage } from '@/lib/types/stage';
 
-export const CLASSROOMS_DIR = path.join(process.cwd(), 'data', 'classrooms');
-export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
+// Resolve project root to ensure correct paths in all environments
+const projectRoot = process.env.PROJECT_ROOT || (process.cwd().includes('.next/standalone')
+  ? path.resolve(process.cwd(), '..', '..')
+  : process.cwd());
+
+export const CLASSROOMS_DIR = path.join(projectRoot, 'data', 'classrooms');
+export const CLASSROOM_JOBS_DIR = path.join(projectRoot, 'data', 'classroom-jobs');
 
 async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true });

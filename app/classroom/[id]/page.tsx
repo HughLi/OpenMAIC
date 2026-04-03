@@ -68,7 +68,35 @@ export default function ClassroomDetailPage() {
 
   const loadClassroom = useCallback(async () => {
     try {
+      // Reset stage state before loading new course
+      // This prevents showing stale data from previous course
+      useStageStore.setState({
+        stage: null,
+        scenes: [],
+        currentSceneId: null,
+        chats: [],
+      });
+      
       await loadFromStorage(classroomId);
+
+      // Always update audio URLs to server endpoint after loading
+      // This ensures audio works for students even if IndexedDB has stale data
+      const stateAfterLoad = useStageStore.getState();
+      if (stateAfterLoad.scenes.length > 0) {
+        const updatedScenes = stateAfterLoad.scenes.map((scene: Scene) => ({
+          ...scene,
+          actions: scene.actions?.map((action) => {
+            if (action.type === 'speech' && action.audioId) {
+              return {
+                ...action,
+                audioUrl: `/api/classroom/audio?classroomId=${classroomId}&audioId=${action.audioId}`,
+              };
+            }
+            return action;
+          }),
+        }));
+        useStageStore.setState({ scenes: updatedScenes });
+      }
 
       // If IndexedDB had no data, try server-side storage (API-generated classrooms)
       if (!useStageStore.getState().stage) {

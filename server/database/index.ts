@@ -4,7 +4,12 @@ import path from 'path';
 
 let dbInstance: Database.Database | null = null;
 
-const defaultDbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'database', 'openmaic.db');
+// Resolve database path relative to project root
+// This ensures the correct database is used even when running from .next/standalone
+const projectRoot = process.env.PROJECT_ROOT || (process.cwd().includes('.next/standalone')
+  ? path.resolve(process.cwd(), '..', '..')
+  : process.cwd());
+const defaultDbPath = process.env.DATABASE_PATH || path.join(projectRoot, 'data', 'database', 'openmaic.db');
 
 export interface DatabaseConfig {
   path?: string;
@@ -52,7 +57,7 @@ export function closeDatabase(): void {
 
 export function initializeSchema(db?: Database.Database): void {
   const database = db || getDatabase();
-  const schemaPath = path.join(process.cwd(), 'server', 'database', 'schema.sql');
+  const schemaPath = path.join(projectRoot, 'server', 'database', 'schema.sql');
 
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found: ${schemaPath}`);

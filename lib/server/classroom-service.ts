@@ -5,11 +5,16 @@ import type { Scene, Stage } from '@/lib/types/stage';
 import type { Slide } from '@/lib/types/slides';
 import { getDatabase } from '@/server/database';
 
+// Resolve project root to ensure correct paths in all environments
+const projectRoot = process.env.PROJECT_ROOT || (process.cwd().includes('.next/standalone')
+  ? path.resolve(process.cwd(), '..', '..')
+  : process.cwd());
+
 // Storage directories
 // New structure: data/classrooms/{owner_id}/{stage_id}/
-export const CLASSROOMS_DIR = path.join(process.cwd(), 'data', 'classrooms');
-export const CLASSROOM_MEDIA_DIR = path.join(process.cwd(), 'data', 'classrooms', 'media');
-export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
+export const CLASSROOMS_DIR = path.join(projectRoot, 'data', 'classrooms');
+export const CLASSROOM_MEDIA_DIR = path.join(projectRoot, 'data', 'classrooms', 'media');
+export const CLASSROOM_JOBS_DIR = path.join(projectRoot, 'data', 'classroom-jobs');
 
 /**
  * Get classroom storage path with user isolation

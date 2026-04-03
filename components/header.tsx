@@ -11,6 +11,8 @@ import {
   FileDown,
   Package,
   Video,
+  CloudUpload,
+  CheckCircle,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useTheme } from '@/lib/hooks/use-theme';
@@ -22,6 +24,7 @@ import { useStageStore } from '@/lib/store/stage';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useExportPPTX } from '@/lib/export/use-export-pptx';
 import { useExportVideo } from '@/lib/export/use-export-video';
+import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
@@ -45,6 +48,10 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const failedOutlines = useStageStore((s) => s.failedOutlines);
   const mediaTasks = useMediaGenerationStore((s) => s.tasks);
 
+  // Sync/Publish
+  const { syncWithMedia, isSyncing, syncStatus } = useClassroomSync();
+  const stage = useStageStore((s) => s.stage);
+
   const canExport =
     scenes.length > 0 &&
     generatingOutlines.length === 0 &&
@@ -52,6 +59,39 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     Object.values(mediaTasks).every((task) => task.status === 'done' || task.status === 'failed');
 
   const isAnyExporting = isExporting || isExportingVideo;
+
+  // Handle publish/sync to server
+  const handlePublish = async () => {
+    if (!stage || isSyncing) return;
+
+    const tokenData = localStorage.getItem('openmaic_tokens')
+      ? JSON.parse(localStorage.getItem('openmaic_tokens')!)
+      : null;
+    const token = tokenData?.accessToken;
+    const userId = tokenData?.user?.id || tokenData?.userId || 'anonymous';
+
+    if (!token) {
+      alert('请先登录后再发布课程');
+      return;
+    }
+
+    try {
+      const result = await syncWithMedia({
+        stage,
+        scenes,
+        ownerId: userId,
+        visibility: 'public',
+      });
+
+      if (result.success) {
+        alert(`课程发布成功！\n课程ID: ${result.classroomId}\n访问链接: ${result.url || 'N/A'}`);
+      } else {
+        alert(`发布失败: ${result.error || '未知错误'}`);
+      }
+    } catch (err) {
+      alert(`发布失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    }
+  };
 
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
@@ -222,6 +262,32 @@ export function Header({ currentSceneTitle }: HeaderProps) {
             </button>
           </div>
         </div>
+
+        {/* Publish Button */}
+        <button
+          onClick={handlePublish}
+          disabled={!stage || isSyncing || scenes.length === 0}
+          title={isSyncing ? '发布中...' : '发布到服务器（包含音频）'}
+          className={cn(
+            'shrink-0 p-2 rounded-full transition-all flex items-center gap-1.5 px-3 text-sm font-medium',
+            stage && !isSyncing && scenes.length > 0
+              ? syncStatus === 'synced'
+                ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+                : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+              : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50',
+          )}
+        >
+          {isSyncing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : syncStatus === 'synced' ? (
+            <CheckCircle className="w-4 h-4" />
+          ) : (
+            <CloudUpload className="w-4 h-4" />
+          )}
+          <span className="hidden sm:inline">
+            {isSyncing ? '发布中...' : syncStatus === 'synced' ? '已发布' : '发布'}
+          </span>
+        </button>
 
         {/* Export Dropdown */}
         <div className="relative" ref={exportRef}>

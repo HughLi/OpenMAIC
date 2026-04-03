@@ -86,14 +86,13 @@ export async function POST(request: NextRequest) {
 
 // GET /api/classroom - Get classroom by ID
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
-  if (auth instanceof Response) return auth;
-
   try {
     const id = request.nextUrl.searchParams.get('id');
 
     if (!id) {
-      // List user's classrooms
+      // List user's classrooms - requires auth
+      const auth = await requireAuth(request);
+      if (auth instanceof Response) return auth;
       const classrooms = listUserClassrooms(auth.userId);
       return apiSuccess({ classrooms });
     }
@@ -102,12 +101,41 @@ export async function GET(request: NextRequest) {
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid classroom id');
     }
 
-    // Check access permissions
-    if (!canAccessClassroom(id, auth.userId, auth.role)) {
-      return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
+    // Get metadata first to check visibility
+    const metadata = getClassroomMetadata(id);
+    if (!metadata) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
     }
 
-    const metadata = getClassroomMetadata(id);
+    // Public classrooms can be accessed without auth
+    let userId: string | null = null;
+    let userRole: string = 'viewer';
+
+    if (metadata.visibility === 'public') {
+      // Try to get auth info if available, but don't require it
+      const authHeader = request.headers.get('Authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.substring(7);
+          const payload = await verifyToken(token) as AccessTokenPayload;
+          userId = payload.userId;
+          userRole = payload.role;
+        } catch {
+          // Ignore token errors for public courses
+        }
+      }
+    } else {
+      // Private/shared courses require authentication
+      const auth = await requireAuth(request);
+      if (auth instanceof Response) return auth;
+      userId = auth.userId;
+      userRole = auth.role;
+    }
+
+    // Check access permissions
+    if (!canAccessClassroom(id, userId, userRole)) {
+      return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
+    }
 
     // Read classroom with ownerId for new path structure
     const classroom = await readClassroom(id, metadata?.ownerId);
@@ -118,7 +146,7 @@ export async function GET(request: NextRequest) {
     return apiSuccess({
       classroom,
       metadata,
-      isOwner: metadata?.ownerId === auth.userId,
+      isOwner: metadata?.ownerId === userId,
     });
   } catch (error) {
     return apiError(

@@ -1,6 +1,7 @@
 import { type NextRequest } from 'next/server';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { saveClassroomMetadata, persistClassroom, ensureClassroomsDir } from '@/lib/server/classroom-service';
+import { createUserClassroom } from '@/lib/server/user-classroom-service';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
 import { createLogger } from '@/lib/logger';
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
           title: name,
           description,
           category,
-          visibility: 'private',
+          visibility: 'public',
           sceneCount: scenes.length,
         });
 
@@ -96,6 +97,22 @@ export async function POST(request: NextRequest) {
           );
 
           log.info(`Persisted classroom files for: ${id}`);
+        }
+
+        // Also save to user_classrooms for "recent learning" feature
+        const coverImage = data.coverImage || data.cover_image || data.stage?.coverImage;
+        const userClassroomResult = createUserClassroom(auth.userId, {
+          classroomId: id,
+          name,
+          description,
+          sceneCount: scenes.length,
+          coverImage,
+        });
+
+        if (userClassroomResult.success) {
+          log.info(`Saved to user_classrooms: ${id}`);
+        } else {
+          log.warn(`Failed to save to user_classrooms: ${id}`, userClassroomResult.error);
         }
 
         results.imported++;

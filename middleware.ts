@@ -13,6 +13,8 @@ const PUBLIC_PATHS = [
   '/api/auth',
   '/api/categories',
   '/api/server-providers',
+  '/api/classroom', // Public classroom access (API route handles visibility check)
+  '/api/classroom/audio', // Public audio access
   '/_next',
   '/favicon.ico',
   '/globals.css',
