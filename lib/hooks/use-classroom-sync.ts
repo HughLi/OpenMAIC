@@ -86,11 +86,14 @@ export function useClassroomSync(): UseClassroomSyncReturn {
       log.info('Starting classroom sync:', input.stage.id);
 
       // Prepare request body
+      // Use both name and title to ensure compatibility with API
+      const classroomName = input.stage.name || 'Untitled Classroom';
       const body = {
         stage: {
           ...input.stage,
           id: input.stage.id,
-          name: input.stage.name || 'Untitled Classroom',
+          name: classroomName,
+          title: classroomName,
         },
         scenes: input.scenes || [],
         visibility: input.visibility || 'private',
