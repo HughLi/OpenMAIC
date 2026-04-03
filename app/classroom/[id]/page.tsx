@@ -13,6 +13,7 @@ import { createLogger } from '@/lib/logger';
 import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
+import type { Scene } from '@/lib/types/stage';
 
 const log = createLogger('Classroom');
 

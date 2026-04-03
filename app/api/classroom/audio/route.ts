@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check access permissions
-    if (!canAccessClassroom(classroomId, userId, userRole)) {
+    if (!canAccessClassroom(classroomId, userId || '', userRole)) {
       return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
     }
 

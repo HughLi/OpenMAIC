@@ -175,7 +175,7 @@ export function CourseImportMenu({
           let coverImage: string | undefined;
           try {
             const stageData = await loadStageData(stage.id);
-            if (stageData?.scenes?.length > 0) {
+            if (stageData?.scenes && stageData.scenes.length > 0) {
               const firstScene = stageData.scenes[0];
               // Try to extract image from scene content
               const content = firstScene.content as { canvas?: { elements?: Array<{ type: string; src?: string }> } } | undefined;

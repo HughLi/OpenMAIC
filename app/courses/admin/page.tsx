@@ -57,6 +57,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import type { CourseStats } from '../types';
 
 const navItems = [
@@ -181,6 +182,20 @@ export default function AdminDashboardPage({
       alert(result.error || '更新失败');
     }
     setIsSaving(false);
+  };
+
+  // Handle toggle visibility
+  const handleToggleVisibility = async (course: Course) => {
+    const newVisibility = course.visibility === 'public' ? 'private' : 'public';
+    const result = await updateCourse(course.id, {
+      visibility: newVisibility,
+    });
+
+    if (result.success) {
+      refetch();
+    } else {
+      alert(result.error || '更新可见性失败');
+    }
   };
 
   // Handle delete button click
@@ -594,9 +609,10 @@ export default function AdminDashboardPage({
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[250px]">课程名称</TableHead>
+                          <TableHead className="w-[300px]">课程名称</TableHead>
                           <TableHead>作者</TableHead>
                           <TableHead>状态</TableHead>
+                          <TableHead>可见性</TableHead>
                           <TableHead>学员数</TableHead>
                           <TableHead className="hidden sm:table-cell">创建时间</TableHead>
                           <TableHead className="text-right">操作</TableHead>
@@ -606,22 +622,28 @@ export default function AdminDashboardPage({
                         {filteredCourses.map((course) => (
                           <TableRow key={course.id}>
                             <TableCell>
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[#722ed1]/20 to-purple-300/20 flex items-center justify-center shrink-0">
+                              <div className="flex items-center gap-4">
+                                <div className="relative w-20 h-14 rounded-lg bg-gradient-to-br from-[#722ed1]/20 to-purple-300/20 flex items-center justify-center shrink-0 overflow-hidden">
                                   {course.coverImage ? (
                                     <Image
                                       src={course.coverImage}
                                       alt={course.title}
-                                      width={48}
-                                      height={48}
-                                      className="rounded-lg object-cover"
+                                      fill
+                                      className="object-cover"
                                     />
                                   ) : (
                                     <BookOpen className="w-6 h-6 text-[#722ed1]/60" />
                                   )}
                                 </div>
-                                <div className="min-w-0">
-                                  <p className="font-medium truncate">{course.title}</p>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium line-clamp-2 leading-snug" title={course.title}>
+                                    {course.title}
+                                  </p>
+                                  {course.sceneCount !== undefined && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {course.sceneCount} 个场景
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>
@@ -631,6 +653,18 @@ export default function AdminDashboardPage({
                               </span>
                             </TableCell>
                             <TableCell>{getStatusBadge(course.status)}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={course.visibility === 'public'}
+                                  onCheckedChange={() => handleToggleVisibility(course)}
+                                  aria-label={course.visibility === 'public' ? '公开' : '私有'}
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {course.visibility === 'public' ? '公开' : '私有'}
+                                </span>
+                              </div>
+                            </TableCell>
                             <TableCell>{course.studentCount.toLocaleString()}</TableCell>
                             <TableCell className="hidden sm:table-cell">{course.createdAt}</TableCell>
                             <TableCell className="text-right">

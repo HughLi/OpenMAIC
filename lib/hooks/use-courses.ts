@@ -29,9 +29,11 @@ export interface Course {
   studentCount: number;
   progress?: number;
   status: 'active' | 'inactive' | 'draft';
+  visibility: 'private' | 'public' | 'shared';
   createdAt: string;
   updatedAt?: string;
   price?: number;
+  sceneCount?: number;
 }
 
 interface UseCoursesOptions {

@@ -49,7 +49,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const mediaTasks = useMediaGenerationStore((s) => s.tasks);
 
   // Sync/Publish
-  const { syncWithMedia, isSyncing, syncStatus } = useClassroomSync();
+  const { syncClassroom, isSyncing, syncStatus } = useClassroomSync();
   const stage = useStageStore((s) => s.stage);
 
   const canExport =
@@ -76,7 +76,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     }
 
     try {
-      const result = await syncWithMedia({
+      const result = await syncClassroom({
         stage,
         scenes,
         ownerId: userId,
