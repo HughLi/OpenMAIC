@@ -70,11 +70,14 @@ export async function GET(request: NextRequest) {
     if (ownerId) {
       const newAudioDir = getClassroomPath(ownerId, classroomId);
       const audioDir = path.join(path.dirname(newAudioDir), 'audio');
+      log.info(`Looking for audio in new path: ${audioDir}`);
       for (const ext of extensions) {
         const testPath = path.join(audioDir, `${audioId}.${ext}`);
+        log.debug(`Trying: ${testPath}`);
         if (existsSync(testPath)) {
           filePath = testPath;
           fileExt = ext;
+          log.info(`Found audio in new path: ${testPath}`);
           break;
         }
       }
@@ -83,18 +86,21 @@ export async function GET(request: NextRequest) {
     // Try legacy path: data/classrooms/{classroomId}/audio/
     if (!filePath) {
       const legacyAudioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
+      log.info(`Looking for audio in legacy path: ${legacyAudioDir}`);
       for (const ext of extensions) {
         const testPath = path.join(legacyAudioDir, `${audioId}.${ext}`);
+        log.debug(`Trying: ${testPath}`);
         if (existsSync(testPath)) {
           filePath = testPath;
           fileExt = ext;
+          log.info(`Found audio in legacy path: ${testPath}`);
           break;
         }
       }
     }
 
     if (!filePath) {
-      log.warn(`Audio file not found: ${classroomId}/${audioId}`);
+      log.warn(`Audio file not found: ${classroomId}/${audioId}, ownerId: ${ownerId}`);
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Audio file not found');
     }
 

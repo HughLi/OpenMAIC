@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
-import { getClassroomMetadata, updateClassroom } from '@/lib/server/classroom-service';
+import { getClassroomMetadata, updateClassroom, getClassroomPath } from '@/lib/server/classroom-service';
 import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -63,8 +63,17 @@ export async function POST(request: NextRequest) {
       return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Access denied');
     }
 
-    // Save audio file
-    const audioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
+    // Determine audio directory path using new path structure
+    let audioDir: string;
+    if (metadata.ownerId) {
+      // New path: data/classrooms/{ownerId}/{classroomId}/audio/
+      const classroomDir = path.dirname(getClassroomPath(metadata.ownerId, classroomId));
+      audioDir = path.join(classroomDir, 'audio');
+    } else {
+      // Legacy path: data/classrooms/{classroomId}/audio/
+      audioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
+    }
+
     if (!existsSync(audioDir)) {
       await mkdir(audioDir, { recursive: true });
     }
