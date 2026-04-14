@@ -50,6 +50,7 @@ import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
 import { useUserClassroomsSync } from '@/lib/hooks/use-user-classrooms-sync';
 import { useAuth } from '@/lib/auth/auth-context';
 import { UserNav } from '@/components/user-nav';
+import { useImportClassroom } from '@/lib/import/use-import-classroom';
 
 const log = createLogger('Home');
 
@@ -155,6 +156,12 @@ function HomePage() {
     // This function is kept for backward compatibility with refresh logic
     await refetchClassrooms();
   };
+
+  const { importing, fileInputRef, triggerFileSelect, handleFileChange } = useImportClassroom(
+    () => {
+      loadClassrooms();
+    },
+  );
 
   // Load thumbnails when classrooms change
   useEffect(() => {
@@ -337,6 +344,13 @@ function HomePage() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center p-4 pt-16 md:p-8 md:pt-16 overflow-x-hidden">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".zip"
+        onChange={handleFileChange}
+        className="hidden"
+      />
       {/* ═══ Draggable Top-right pill ═══ */}
       <div
         ref={toolbarRef}
@@ -524,6 +538,18 @@ function HomePage() {
           {t('home.slogan')}
         </motion.p>
 
+        {/* ── Import button (empty state) ── */}
+        {userClassrooms.length === 0 && (
+          <button
+            onClick={triggerFileSelect}
+            disabled={importing}
+            className="relative z-10 mt-4 flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
+          >
+            <Upload className="size-3.5" />
+            <span>{t('import.classroom')}</span>
+          </button>
+        )}
+
         {/* ── Unified input area ── Only show for generators/admins -- */}
         {userCanGenerate && (
           <motion.div
@@ -650,6 +676,17 @@ function HomePage() {
               </motion.div>
             </span>
             <div className="flex-1 h-px bg-border/40 group-hover:bg-border/70 transition-colors" />
+          </button>
+
+          <button
+            onClick={triggerFileSelect}
+            disabled={importing}
+            className="group/import grid grid-cols-[auto_0fr] hover:grid-cols-[auto_1fr] items-center gap-1 rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/35 hover:text-muted-foreground/70 hover:bg-muted/50 transition-all duration-200 cursor-pointer"
+          >
+            <Upload className="size-3" />
+            <span className="overflow-hidden opacity-0 group-hover/import:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+              {t('import.classroom')}
+            </span>
           </button>
 
           {/* Expandable content */}

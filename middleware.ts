@@ -6,6 +6,46 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'openmaic-dev-secret-change-in-production'
 );
 
+/** Convert string to Uint8Array */
+function encode(str: string): Uint8Array {
+  return new TextEncoder().encode(str);
+}
+
+/** Convert ArrayBuffer to hex string */
+function bufToHex(buf: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** Verify an HMAC-signed token using Web Crypto API (Edge-compatible) */
+async function verifyAccessCodeToken(token: string, accessCode: string): Promise<boolean> {
+  const dotIndex = token.indexOf('.');
+  if (dotIndex === -1) return false;
+
+  const timestamp = token.substring(0, dotIndex);
+  const signature = token.substring(dotIndex + 1);
+
+  const keyData = encode(accessCode);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyData.buffer as ArrayBuffer,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+
+  const data = encode(timestamp);
+  const expected = bufToHex(await crypto.subtle.sign('HMAC', key, data.buffer as ArrayBuffer));
+
+  if (signature.length !== expected.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < signature.length; i++) {
+    mismatch |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 // Paths that don't require authentication
 const PUBLIC_PATHS = [
   '/login',
@@ -34,6 +74,29 @@ const ADMIN_PATHS = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Access code check (from upstream)
+  const accessCode = process.env.ACCESS_CODE;
+  if (accessCode) {
+    // Whitelist: access-code endpoints, health check
+    if (pathname.startsWith('/api/access-code/') || pathname === '/api/health') {
+      return NextResponse.next();
+    }
+
+    // Check cookie — validate HMAC signature
+    const cookie = request.cookies.get('openmaic_access');
+    if (!cookie?.value || !(await verifyAccessCodeToken(cookie.value, accessCode))) {
+      // API requests without valid cookie → 401
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { success: false, errorCode: 'INVALID_REQUEST', error: 'Access code required' },
+          { status: 401 },
+        );
+      }
+      // Page requests → let through, frontend shows modal
+      return NextResponse.next();
+    }
+  }
 
   // Allow public paths
   if (PUBLIC_PATHS.some(path => pathname.startsWith(path))) {
@@ -116,13 +179,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)|assets).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)|assets|logos/).*)',
   ],
 };

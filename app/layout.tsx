@@ -11,6 +11,7 @@ import { AuthProvider } from '@/lib/auth/auth-context';
 import { Toaster } from '@/components/ui/sonner';
 import { ServerProvidersInit } from '@/components/server-providers-init';
 import { MainNav } from '@/components/main-nav';
+import { AccessCodeGuard } from '@/components/access-code-guard';
 
 const inter = localFont({
   src: '../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
@@ -40,7 +41,9 @@ export default function RootLayout({
             <I18nProvider>
               <ServerProvidersInit />
               <MainNav />
-              <main>{children}</main>
+              <AccessCodeGuard>
+                <main>{children}</main>
+              </AccessCodeGuard>
               <Toaster position="top-center" />
             </I18nProvider>
           </ThemeProvider>

@@ -14,6 +14,7 @@ import {
   Zap,
   CloudUpload,
   CheckCircle,
+  Archive,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useTheme } from '@/lib/hooks/use-theme';
@@ -26,6 +27,7 @@ import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useExportPPTX } from '@/lib/export/use-export-pptx';
 import { useExportVideo } from '@/lib/export/use-export-video';
 import { useExportVideoDirect } from '@/lib/export/use-export-video-direct';
+import { useExportClassroom } from '@/lib/export/use-export-classroom';
 import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
 import { UserNav } from './user-nav';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -47,6 +49,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const { exporting: isExporting, exportPPTX, exportResourcePack } = useExportPPTX();
   const { exporting: isExportingVideo, exportVideo } = useExportVideo();
   const { exporting: isExportingVideoDirect, exportVideo: exportVideoDirect, isSupported: isDirectSupported, progress: videoDirectProgress, status: videoDirectStatus } = useExportVideoDirect();
+  const { exporting: isExportingZip, exportClassroomZip } = useExportClassroom();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const scenes = useStageStore((s) => s.scenes);
@@ -64,7 +67,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     failedOutlines.length === 0 &&
     Object.values(mediaTasks).every((task) => task.status === 'done' || task.status === 'failed');
 
-  const isAnyExporting = isExporting || isExportingVideo || isExportingVideoDirect;
+  const isAnyExporting = isExporting || isExportingVideo || isExportingVideoDirect || isExportingZip;
 
   // Handle publish/sync to server
   const handlePublish = async () => {
