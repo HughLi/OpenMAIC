@@ -75,16 +75,18 @@ export function CourseCard({ course, viewMode }: CourseCardProps) {
         ref={thumbRef}
         className={cn(
           'relative overflow-hidden bg-slate-100 dark:bg-slate-800/80',
-          isGrid ? 'w-full aspect-[16/10]' : 'w-36 h-24 shrink-0'
+          isGrid ? 'w-full aspect-[16/9]' : 'w-32 h-20 shrink-0'
         )}
       >
         {hasThumbnail ? (
-          <ThumbnailSlide
-            slide={course.firstSlide!}
-            size={thumbWidth}
-            viewportSize={course.firstSlide!.viewportSize ?? 1000}
-            viewportRatio={course.firstSlide!.viewportRatio ?? 0.5625}
-          />
+          <div className="w-full h-full flex items-center justify-center">
+            <ThumbnailSlide
+              slide={course.firstSlide!}
+              size={thumbWidth > 0 ? thumbWidth : (isGrid ? 300 : 128)}
+              viewportSize={course.firstSlide!.viewportSize ?? 1000}
+              viewportRatio={course.firstSlide!.viewportRatio ?? 0.5625}
+            />
+          </div>
         ) : hasCoverImage ? (
           <Image
             src={course.coverImage}
@@ -94,52 +96,52 @@ export function CourseCard({ course, viewMode }: CourseCardProps) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#722ed1]/20 to-purple-300/20">
-            <BookOpen className="w-12 h-12 text-[#722ed1]/40" />
+            <BookOpen className="w-10 h-10 text-[#722ed1]/40" />
           </div>
         )}
         {/* Category Badge */}
         <Badge
-          className="absolute top-2 left-2 bg-[#722ed1] text-white hover:bg-[#722ed1]/90"
+          className="absolute top-2 left-2 bg-[#722ed1] text-white hover:bg-[#722ed1]/90 text-[10px] px-1.5 py-0.5"
         >
           {course.category}
         </Badge>
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-3 flex flex-col">
-        <h3 className="font-medium text-sm mb-1 line-clamp-2 group-hover:text-[#722ed1] transition-colors leading-tight">
+      <div className="flex-1 p-2.5 flex flex-col gap-1">
+        <h3 className="font-medium text-sm leading-snug line-clamp-2 group-hover:text-[#722ed1] transition-colors">
           {course.title}
         </h3>
 
         {/* Instructor */}
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex items-center gap-1.5">
           {course.instructor.avatar ? (
             <Image
               src={course.instructor.avatar}
               alt={course.instructor.name}
-              width={20}
-              height={20}
+              width={16}
+              height={16}
               className="rounded-full"
             />
           ) : (
-            <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px]">
+            <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[9px]">
               {course.instructor.name.charAt(0)}
             </div>
           )}
-          <span className="text-xs text-muted-foreground truncate max-w-[80px]">{course.instructor.name}</span>
+          <span className="text-[11px] text-muted-foreground truncate max-w-[100px]">{course.instructor.name}</span>
         </div>
 
         {/* Description - Hidden in grid view for compactness */}
         {!isGrid && (
-          <p className="text-xs text-muted-foreground line-clamp-1 mb-2">
+          <p className="text-xs text-muted-foreground line-clamp-1">
             {course.description}
           </p>
         )}
 
         {/* Stats & Progress */}
-        <div className={cn("space-y-1.5", isGrid && "mt-auto")}>
+        <div className={cn("flex flex-col gap-1", isGrid && "mt-auto pt-1")}>
           {/* Rating & Students */}
-          <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center justify-between text-[11px]">
             <div className="flex items-center gap-0.5">
               <Star data-testid="star-icon" className="w-3 h-3 fill-amber-400 text-amber-400" />
               <span className="font-medium">{course.rating}</span>
@@ -152,7 +154,7 @@ export function CourseCard({ course, viewMode }: CourseCardProps) {
 
           {/* Progress Bar */}
           {course.progress !== undefined && (
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>进度</span>
                 <span>{course.progress}%</span>

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, LogOut, Settings, Sparkles, Shield } from 'lucide-react';
+import { User, LogOut, Sparkles, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -13,13 +13,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/lib/auth/auth-context';
-import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
 import { toast } from 'sonner';
 
 export function UserNav() {
   const router = useRouter();
   const { user, logout, canGenerate, canAdmin } = useAuth();
-  const { openDialog } = useSettingsDialogStore();
 
   const handleLogout = async () => {
     try {
@@ -29,10 +27,6 @@ export function UserNav() {
     } catch {
       toast.error('退出失败');
     }
-  };
-
-  const handleSettingsClick = () => {
-    openDialog(undefined);
   };
 
   if (!user) {
@@ -100,10 +94,6 @@ export function UserNav() {
             </Link>
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={handleSettingsClick} className="cursor-pointer">
-          <Settings className="mr-2 h-4 w-4" />
-          设置
-        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
           <LogOut className="mr-2 h-4 w-4" />

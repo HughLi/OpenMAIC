@@ -2,6 +2,7 @@ import { type NextRequest } from 'next/server';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import {
   getClassroomFirstSlide,
+  buildRequestOrigin,
 } from '@/lib/server/classroom-service';
 import { getDatabase } from '@/server/database';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
@@ -21,7 +22,10 @@ async function requireAuth(request: NextRequest): Promise<AccessTokenPayload | R
   }
 }
 
-// GET /api/courses - Get all visible courses (all users can see all active courses)
+// GET /api/courses - Get visible courses based on user role
+// - viewer: only public courses
+// - generator: public courses + own private courses
+// - admin: all courses
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof Response) return auth;
@@ -30,7 +34,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');
 
-    // Get all active classrooms from database (all users see all courses)
+    // Get active classrooms based on user role
     const db = getDatabase();
     let query = `
       SELECT c.id, c.owner_id, c.title, c.description, c.category, c.cover_image,
@@ -42,6 +46,17 @@ export async function GET(request: NextRequest) {
     `;
     const params: (string | number)[] = [];
 
+    // Filter by visibility based on user role
+    if (auth.role === 'viewer') {
+      // Viewers can only see public courses
+      query += ` AND c.visibility = 'public'`;
+    } else if (auth.role === 'generator') {
+      // Generators can see public courses + their own private courses
+      query += ` AND (c.visibility = 'public' OR c.owner_id = ?)`;
+      params.push(auth.userId);
+    }
+    // Admin can see all courses (no visibility filter)
+
     if (category && category !== 'all') {
       query += ` AND c.category = ?`;
       params.push(category);
@@ -49,7 +64,20 @@ export async function GET(request: NextRequest) {
 
     query += ` ORDER BY c.created_at DESC`;
 
-    const classrooms = db.prepare(query).all(...params) as Array<{
+    const classroomsRaw = db.prepare(query).all(...params);
+
+    // Validate classrooms is an array
+    if (!Array.isArray(classroomsRaw)) {
+      console.error('[Courses API] Query did not return an array:', classroomsRaw);
+      return apiError(
+        API_ERROR_CODES.INTERNAL_ERROR,
+        500,
+        'Invalid database response',
+        'Query result is not an array',
+      );
+    }
+
+    const classrooms = classroomsRaw as Array<{
       id: string;
       owner_id: string;
       title: string;
@@ -64,16 +92,43 @@ export async function GET(request: NextRequest) {
       author_name: string | null;
     }>;
 
+    console.log(`[Courses API] Found ${classrooms.length} classrooms`);
+
+    // Build base URL for media resolution
+    const baseUrl = buildRequestOrigin(request);
+
     // Load first slide for each classroom (for thumbnails)
-    const classroomsWithSlides = await Promise.all(
-      classrooms.map(async (classroom) => {
-        const firstSlide = await getClassroomFirstSlide(classroom.id);
-        return {
-          ...classroom,
-          firstSlide,
-        };
-      })
-    );
+    let classroomsWithSlides;
+    try {
+      classroomsWithSlides = await Promise.all(
+        classrooms.map(async (classroom, index) => {
+          try {
+            // Validate classroom id
+            if (!classroom?.id) {
+              console.error(`[Courses API] Invalid classroom at index ${index}:`, classroom);
+              return {
+                ...classroom,
+                firstSlide: null,
+              };
+            }
+            const firstSlide = await getClassroomFirstSlide(classroom.id, baseUrl);
+            return {
+              ...classroom,
+              firstSlide,
+            };
+          } catch (slideError) {
+            console.error(`[Courses API] Error loading first slide for ${classroom?.id}:`, slideError);
+            return {
+              ...classroom,
+              firstSlide: null,
+            };
+          }
+        })
+      );
+    } catch (promiseError) {
+      console.error('[Courses API] Error in Promise.all:', promiseError);
+      throw promiseError;
+    }
 
     // Transform to Course format
     const courses = classroomsWithSlides.map(classroom => ({

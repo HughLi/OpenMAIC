@@ -122,32 +122,48 @@ export function getUserClassroomById(id: string): UserClassroom | undefined {
 
 export function listUserClassrooms(
   userId: string,
-  options: { page?: number; limit?: number; search?: string } = {}
+  options: { page?: number; limit?: number; search?: string; userRole?: string } = {}
 ): ListResult {
   const db = getDatabase();
-  const { page = 1, limit = 20, search } = options;
+  const { page = 1, limit = 20, search, userRole = 'viewer' } = options;
 
-  let whereClause = 'WHERE user_id = ?';
+  // Join with classrooms table to check visibility
+  let whereClause = 'WHERE uc.user_id = ?';
   const params: (string | number)[] = [userId];
 
+  // Filter by visibility based on user role
+  if (userRole === 'viewer') {
+    // Viewers can only see public courses
+    whereClause += ` AND (c.visibility = 'public' OR c.visibility IS NULL)`;
+  } else if (userRole === 'generator') {
+    // Generators can see public courses + their own private courses
+    whereClause += ` AND (c.visibility = 'public' OR c.visibility IS NULL OR c.owner_id = ?)`;
+    params.push(userId);
+  }
+  // Admin can see all courses (no visibility filter)
+
   if (search) {
-    whereClause += ' AND (name LIKE ? OR description LIKE ?)';
+    whereClause += ' AND (uc.name LIKE ? OR uc.description LIKE ?)';
     params.push(`%${search}%`, `%${search}%`);
   }
 
-  // Get total count
+  // Get total count with join
   const countResult = db.prepare(
-    `SELECT COUNT(*) as total FROM user_classrooms ${whereClause}`
+    `SELECT COUNT(*) as total
+     FROM user_classrooms uc
+     LEFT JOIN classrooms c ON uc.classroom_id = c.id
+     ${whereClause}`
   ).get(...params) as { total: number };
 
-  // Get paginated results
+  // Get paginated results with join
   const offset = (page - 1) * limit;
   const rows = db.prepare(
-    `SELECT id, user_id, classroom_id, name, description, scene_count, cover_image,
-            last_accessed_at, created_at, updated_at
-     FROM user_classrooms
+    `SELECT uc.id, uc.user_id, uc.classroom_id, uc.name, uc.description, uc.scene_count, uc.cover_image,
+            uc.last_accessed_at, uc.created_at, uc.updated_at
+     FROM user_classrooms uc
+     LEFT JOIN classrooms c ON uc.classroom_id = c.id
      ${whereClause}
-     ORDER BY updated_at DESC
+     ORDER BY uc.updated_at DESC
      LIMIT ? OFFSET ?`
   ).all(...params, limit, offset) as Array<{
     id: string;

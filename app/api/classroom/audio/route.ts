@@ -68,8 +68,7 @@ export async function GET(request: NextRequest) {
 
     // Try new path structure: data/classrooms/{ownerId}/{classroomId}/audio/
     if (ownerId) {
-      const newAudioDir = getClassroomPath(ownerId, classroomId);
-      const audioDir = path.join(path.dirname(newAudioDir), 'audio');
+      const audioDir = path.join(getClassroomPath(ownerId, classroomId), 'audio');
       log.info(`Looking for audio in new path: ${audioDir}`);
       for (const ext of extensions) {
         const testPath = path.join(audioDir, `${audioId}.${ext}`);

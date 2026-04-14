@@ -139,6 +139,7 @@
 
 import { extractText, getDocumentProxy, extractImages } from 'unpdf';
 import sharp from 'sharp';
+import AdmZip from 'adm-zip';
 import type { PDFParserConfig } from './types';
 import type { ParsedPdfContent } from '@/lib/types/pdf';
 import { PDF_PROVIDERS } from './constants';
@@ -263,15 +264,18 @@ async function parseWithUnpdf(pdfBuffer: Buffer): Promise<ParsedPdfContent> {
 }
 
 /**
- * Parse PDF using self-hosted MinerU service (mineru-api)
- *
- * Official MinerU API endpoint:
- * POST /file_parse  (multipart/form-data)
- *
- * Response format:
- * { results: { "document.pdf": { md_content, images, content_list, ... } } }
- *
- * @see https://github.com/opendatalab/MinerU
+ * Detect if using MinerU.net commercial API or self-hosted MinerU
+ * Commercial API: baseUrl contains "mineru.net" or starts with https://api
+ */
+function isCommercialMinerU(baseUrl: string): boolean {
+  return baseUrl.includes('mineru.net') || baseUrl.startsWith('https://api');
+}
+
+/**
+ * Parse PDF using MinerU
+ * Supports both:
+ * 1. MinerU.net commercial API (https://mineru.net/apiManage/docs)
+ * 2. Self-hosted MinerU service (https://github.com/opendatalab/MinerU)
  */
 async function parseWithMinerU(
   config: PDFParserConfig,
@@ -285,7 +289,371 @@ async function parseWithMinerU(
     );
   }
 
-  log.info('[MinerU] Parsing PDF with MinerU server:', config.baseUrl);
+  // Detect which API to use
+  const isCommercial = isCommercialMinerU(config.baseUrl);
+
+  if (isCommercial) {
+    return parseWithMinerUCommercial(config, pdfBuffer);
+  } else {
+    return parseWithMinerUSelfHosted(config, pdfBuffer);
+  }
+}
+
+/**
+ * Parse PDF using MinerU.net commercial API
+ * API Docs: https://mineru.net/apiManage/docs
+ *
+ * Flow:
+ * 1. Upload file to get file_id
+ * 2. POST /api/v4/extract/task to create task
+ * 3. Poll GET /api/v4/extract/task/{task_id} for results
+ */
+async function parseWithMinerUCommercial(
+  config: PDFParserConfig,
+  pdfBuffer: Buffer,
+): Promise<ParsedPdfContent> {
+  const baseUrl = config.baseUrl!.replace(/\/$/, ''); // Remove trailing slash
+  const apiKey = config.apiKey;
+
+  if (!apiKey) {
+    throw new Error('API Key is required for MinerU.net commercial API');
+  }
+
+  log.info('[MinerU Commercial] Starting PDF parsing:', baseUrl);
+
+  // Step 1: Get upload URL
+  // Use batch endpoint as per official API docs: https://mineru.net/apiManage/docs
+  // Endpoint: POST /api/v4/file-urls/batch
+  const uploadUrlEndpoint = `${baseUrl}/api/v4/file-urls/batch`;
+  log.info('[MinerU Commercial] Requesting upload URL from:', uploadUrlEndpoint);
+
+  const uploadUrlResponse = await fetch(uploadUrlEndpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      files: [
+        {
+          name: 'document.pdf',
+          data_id: `pdf_${Date.now()}`,
+        },
+      ],
+      model_version: 'vlm',
+    }),
+  });
+
+  if (!uploadUrlResponse.ok) {
+    const errorText = await uploadUrlResponse.text().catch(() => uploadUrlResponse.statusText);
+    log.error('[MinerU Commercial] Get upload URL failed:', {
+      status: uploadUrlResponse.status,
+      endpoint: uploadUrlEndpoint,
+      response: errorText.substring(0, 500),
+    });
+    throw new Error(`Failed to get upload URL (${uploadUrlResponse.status}): ${errorText}`);
+  }
+
+  const uploadData = await uploadUrlResponse.json();
+  log.info('[MinerU Commercial] Upload URL response:', JSON.stringify(uploadData).substring(0, 200));
+
+  // Extract file_urls and batch_id from response
+  const fileUrls = uploadData.file_urls || uploadData.data?.file_urls;
+  const batchId = uploadData.batch_id || uploadData.data?.batch_id;
+
+  if (!fileUrls || fileUrls.length === 0) {
+    throw new Error('Invalid upload URL response: missing file_urls');
+  }
+
+  const uploadUrl = fileUrls[0];
+  log.info('[MinerU Commercial] Got upload URL, uploading file...');
+
+  // Step 2: Upload file to the presigned URL using PUT
+  // Note: Do NOT add any headers - the presigned URL already contains all necessary auth
+  log.info('[MinerU Commercial] Uploading file to OSS, size:', pdfBuffer.length, 'bytes');
+  log.info('[MinerU Commercial] Upload URL (first 100 chars):', uploadUrl.substring(0, 100));
+
+  const uploadStartTime = Date.now();
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: new Uint8Array(pdfBuffer),
+  });
+  const uploadDuration = Date.now() - uploadStartTime;
+
+  log.info('[MinerU Commercial] OSS upload response status:', uploadResponse.status);
+  log.info('[MinerU Commercial] OSS upload duration:', uploadDuration, 'ms');
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text().catch(() => uploadResponse.statusText);
+    log.error('[MinerU Commercial] OSS upload failed:', errorText.substring(0, 500));
+    throw new Error(`Failed to upload file (${uploadResponse.status}): ${errorText}`);
+  }
+
+  log.info('[MinerU Commercial] File uploaded to OSS successfully, batch_id:', batchId);
+  log.info('[MinerU Commercial] Waiting 2 seconds for MinerU to process file upload...');
+
+  // Wait a moment for MinerU to detect the file upload
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Step 3: Query batch results
+  // For batch API, use GET /api/v4/extract-results/batch/{batch_id}
+  const batchResult = await pollMinerUCommercialBatch(baseUrl, apiKey, batchId);
+
+  return await extractMinerUCommercialResult(batchResult);
+}
+
+/**
+ * Poll MinerU commercial batch API for results
+ * Endpoint: GET /api/v4/extract-results/batch/{batch_id}
+ */
+async function pollMinerUCommercialBatch(
+  baseUrl: string,
+  apiKey: string,
+  batchId: string,
+  maxAttempts = 120, // 10 minutes (120 * 5s = 600s)
+  intervalMs = 5000, // 5 seconds between polls
+): Promise<Record<string, unknown>> {
+  if (!batchId) {
+    throw new Error('batch_id is required for polling');
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    log.info(`[MinerU Commercial] Polling batch... (${attempt}/${maxAttempts})`);
+
+    const response = await fetch(`${baseUrl}/api/v4/extract-results/batch/${batchId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to poll task (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    const taskData = data.data || data;
+
+    // MinerU API returns extract_result array with state field for each file
+    const extractResultArray = taskData.extract_result as Array<Record<string, unknown>> | undefined;
+    const extractResult = extractResultArray?.[0] || taskData;
+    const state = (extractResult.state || taskData.state || taskData.status) as string;
+    const errMsg = (extractResult.err_msg || extractResult.error_message) as string | undefined;
+
+    // Log full response for debugging (first 3 attempts and then every 10)
+    if (attempt <= 3 || attempt % 10 === 0) {
+      log.info(`[MinerU Commercial] Full response (attempt ${attempt}):`, JSON.stringify(taskData).substring(0, 800));
+    }
+
+    log.info(`[MinerU Commercial] Batch state: ${state}, attempt: ${attempt}/${maxAttempts}`);
+
+    if (state === 'done' || state === 'completed' || state === 'success') {
+      log.info('[MinerU Commercial] Task completed!');
+      return extractResult as Record<string, unknown>;
+    }
+
+    if (state === 'failed' || state === 'error') {
+      log.error('[MinerU Commercial] Task failed:', errMsg);
+      throw new Error(`Task failed: ${errMsg || 'Unknown error'}`);
+    }
+
+    // Task is still processing, wait and retry
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`Task polling timeout after ${maxAttempts} attempts`);
+}
+
+/**
+ * Extract ParsedPdfContent from MinerU commercial API result
+ * MinerU returns a zip file URL that we need to download and extract
+ */
+async function extractMinerUCommercialResult(taskData: Record<string, unknown>): Promise<ParsedPdfContent> {
+  // MinerU API returns result in extract_result array
+  const extractResultArray = taskData.extract_result as Array<Record<string, unknown>> | undefined;
+  const extractResult = (extractResultArray?.[0] || taskData.result || taskData) as Record<string, unknown>;
+
+  // Check if result contains zip URL (MinerU commercial API returns full_zip_url)
+  const zipUrl = extractResult.full_zip_url as string | undefined;
+
+  if (zipUrl) {
+    log.info('[MinerU Commercial] Downloading result zip:', zipUrl);
+    return downloadAndExtractMinerUResult(zipUrl);
+  }
+
+  // Fallback to direct result parsing (if API changes)
+  const result = extractResult;
+
+  // Extract markdown content
+  const markdown: string = (result.markdown as string) ||
+    (result.md_content as string) ||
+    (result.text as string) ||
+    '';
+
+  // Extract images
+  const images: string[] = [];
+  const pdfImages: Array<{
+    id: string;
+    src: string;
+    pageNumber: number;
+    description?: string;
+  }> = [];
+
+  const imageList = (result.images || result.image_list || []) as Array<Record<string, unknown> | string>;
+  if (Array.isArray(imageList)) {
+    for (let i = 0; i < imageList.length; i++) {
+      const img = imageList[i];
+      const imageUrl = typeof img === 'string'
+        ? img
+        : (img.url as string) || (img.src as string) || (img.image_url as string);
+      if (imageUrl) {
+        images.push(imageUrl);
+        pdfImages.push({
+          id: `img_${i + 1}`,
+          src: imageUrl,
+          pageNumber: typeof img === 'object' && img.page_idx !== undefined ? (img.page_idx as number) + 1 : 0,
+          description: typeof img === 'object' ? (img.caption as string) || (img.description as string) : undefined,
+        });
+      }
+    }
+  }
+
+  // Extract page count
+  const pageCount = (result.page_count as number) ||
+    (result.pageCount as number) ||
+    (result.num_pages as number) ||
+    ((result.pages as unknown[])?.length || 0);
+
+  log.info(
+    `[MinerU Commercial] Parsed successfully: ${images.length} images, ` +
+      `${markdown.length} chars of markdown, ${pageCount} pages`,
+  );
+
+  return {
+    text: markdown,
+    images,
+    metadata: {
+      pageCount,
+      parser: 'mineru-commercial',
+      pdfImages,
+      taskId: taskData.task_id as string,
+    },
+  };
+}
+
+/**
+ * Download and extract MinerU result zip file
+ * MinerU commercial API returns a zip file containing the parsed results
+ */
+async function downloadAndExtractMinerUResult(zipUrl: string): Promise<ParsedPdfContent> {
+  log.info('[MinerU Commercial] Downloading zip file:', zipUrl);
+
+  const response = await fetch(zipUrl);
+
+  if (!response.ok) {
+    throw new Error(`Failed to download result zip: ${response.status} ${response.statusText}`);
+  }
+
+  const zipBuffer = Buffer.from(await response.arrayBuffer());
+  log.info('[MinerU Commercial] Downloaded zip file, size:', zipBuffer.byteLength, 'bytes');
+
+  try {
+    // Extract zip using adm-zip
+    const zip = new AdmZip(zipBuffer);
+    const zipEntries = zip.getEntries();
+
+    log.info('[MinerU Commercial] Zip entries:', zipEntries.map((e: { entryName: string }) => e.entryName).join(', '));
+
+    // Find full.md (main markdown content)
+    const mdEntry = zipEntries.find((entry: { entryName: string }) => entry.entryName === 'full.md');
+    const contentListEntry = zipEntries.find((entry: { entryName: string }) => entry.entryName === 'content_list_v2.json');
+
+    let markdown = '';
+    let pageCount = 0;
+    const images: string[] = [];
+    const pdfImages: Array<{ id: string; src: string; pageNumber: number; description?: string }> = [];
+
+    // Extract markdown content
+    if (mdEntry) {
+      markdown = mdEntry.getData().toString('utf-8');
+      log.info('[MinerU Commercial] Extracted markdown, length:', markdown.length);
+    } else {
+      log.warn('[MinerU Commercial] full.md not found in zip');
+    }
+
+    // Parse content_list_v2.json for images and page info
+    if (contentListEntry) {
+      try {
+        const contentList = JSON.parse(contentListEntry.getData().toString('utf-8'));
+        if (Array.isArray(contentList)) {
+          const pages = new Set(contentList.map(item => item.page_idx).filter((v): v is number => v != null));
+          pageCount = pages.size;
+
+          // Extract images from content list
+          for (const item of contentList) {
+            if (item.type === 'image' && item.img_path) {
+              // Try to find the image in zip entries
+              const imageName = item.img_path.split('/').pop();
+              const imageEntry = zipEntries.find((e: { entryName: string }) => e.entryName === imageName || e.entryName.endsWith(`/${imageName}`));
+
+              if (imageEntry) {
+                const imageBuffer = imageEntry.getData();
+                const base64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+                images.push(base64);
+                pdfImages.push({
+                  id: `img_${pdfImages.length + 1}`,
+                  src: base64,
+                  pageNumber: item.page_idx != null ? item.page_idx + 1 : 0,
+                  description: item.image_caption?.[0],
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        log.warn('[MinerU Commercial] Failed to parse content_list_v2.json:', e);
+      }
+    }
+
+    log.info(
+      `[MinerU Commercial] Parsed successfully: ${images.length} images, ` +
+      `${markdown.length} chars of markdown, ${pageCount} pages`
+    );
+
+    return {
+      text: markdown,
+      images,
+      metadata: {
+        pageCount,
+        parser: 'mineru-commercial',
+        zipUrl,
+        pdfImages,
+      },
+    };
+  } catch (e) {
+    log.error('[MinerU Commercial] Failed to extract zip:', e);
+    throw new Error(`Failed to extract result zip: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+/**
+ * Parse PDF using self-hosted MinerU service (mineru-api)
+ *
+ * Official MinerU API endpoint:
+ * POST /file_parse  (multipart/form-data)
+ *
+ * Response format:
+ * { results: { "document.pdf": { md_content, images, content_list, ... } } }
+ *
+ * @see https://github.com/opendatalab/MinerU
+ */
+async function parseWithMinerUSelfHosted(
+  config: PDFParserConfig,
+  pdfBuffer: Buffer,
+): Promise<ParsedPdfContent> {
+  const baseUrl = config.baseUrl!.replace(/\/$/, '');
+  log.info('[MinerU Self-Hosted] Parsing PDF with MinerU server:', baseUrl);
 
   const fileName = 'document.pdf';
 
@@ -303,11 +671,7 @@ async function parseWithMinerU(
   formData.append('files', blob, fileName);
 
   // MinerU API form fields
-  // Defaults already: return_md=true, formula_enable=true, table_enable=true
   formData.append('parse_method', 'auto');
-  // hybrid-auto-engine: best accuracy, uses VLM for layout understanding (requires GPU)
-  // pipeline: basic mode, no VLM, faster but lower quality image extraction
-  // FIX: Use 'pipeline' for CPU-only mode (M1/M2/M3 without GPU)
   formData.append('backend', 'pipeline');
   formData.append('return_content_list', 'true');
   formData.append('return_images', 'true');
@@ -319,7 +683,7 @@ async function parseWithMinerU(
   }
 
   // POST /file_parse
-  const response = await fetch(`${config.baseUrl}/file_parse`, {
+  const response = await fetch(`${baseUrl}/file_parse`, {
     method: 'POST',
     headers,
     body: formData,
@@ -336,20 +700,19 @@ async function parseWithMinerU(
   const fileResult = json.results?.[fileName];
   if (!fileResult) {
     const keys = json.results ? Object.keys(json.results) : [];
-    // Try first available key in case filename doesn't match exactly
     const fallback = keys.length > 0 ? json.results[keys[0]] : null;
     if (!fallback) {
       throw new Error(`MinerU returned no results. Response keys: ${JSON.stringify(keys)}`);
     }
     log.warn(`[MinerU] Filename mismatch, using key "${keys[0]}" instead of "${fileName}"`);
-    return extractMinerUResult(fallback);
+    return extractMinerUSelfHostedResult(fallback);
   }
 
-  return extractMinerUResult(fileResult);
+  return extractMinerUSelfHostedResult(fileResult);
 }
 
-/** Extract ParsedPdfContent from a single MinerU file result */
-function extractMinerUResult(fileResult: Record<string, unknown>): ParsedPdfContent {
+/** Extract ParsedPdfContent from self-hosted MinerU result */
+function extractMinerUSelfHostedResult(fileResult: Record<string, unknown>): ParsedPdfContent {
   const markdown: string = (fileResult.md_content as string) || '';
   const imageData: Record<string, string> = {};
   let pageCount = 0;

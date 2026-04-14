@@ -67,8 +67,7 @@ export async function POST(request: NextRequest) {
     let audioDir: string;
     if (metadata.ownerId) {
       // New path: data/classrooms/{ownerId}/{classroomId}/audio/
-      const classroomDir = path.dirname(getClassroomPath(metadata.ownerId, classroomId));
-      audioDir = path.join(classroomDir, 'audio');
+      audioDir = path.join(getClassroomPath(metadata.ownerId, classroomId), 'audio');
     } else {
       // Legacy path: data/classrooms/{classroomId}/audio/
       audioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');

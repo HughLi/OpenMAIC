@@ -7,6 +7,7 @@ import {
 } from '@/lib/server/user-classroom-service';
 
 // GET /api/user/classrooms - List user's classrooms
+// Filters private courses based on user role
 export async function GET(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20', 10);
     const search = searchParams.get('search') || undefined;
 
-    const result = listUserClassrooms(authResult.id, { page, limit, search });
+    const result = listUserClassrooms(authResult.id, { page, limit, search, userRole: authResult.role });
 
     return apiSuccess({
       classrooms: result.classrooms.map(c => ({

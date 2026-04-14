@@ -20,9 +20,21 @@ export interface DatabaseConfig {
 export function createDatabase(config: DatabaseConfig = {}): Database.Database {
   const dbPath = config.path || defaultDbPath;
 
+  console.log(`[Database] Creating database connection to: ${dbPath}`);
+  console.log(`[Database] cwd: ${process.cwd()}, PROJECT_ROOT: ${process.env.PROJECT_ROOT}`);
+
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
+    console.log(`[Database] Creating directory: ${dbDir}`);
     fs.mkdirSync(dbDir, { recursive: true });
+  }
+
+  // Check if file exists and its size
+  if (fs.existsSync(dbPath)) {
+    const stats = fs.statSync(dbPath);
+    console.log(`[Database] Database file exists, size: ${stats.size} bytes`);
+  } else {
+    console.log(`[Database] Database file does not exist, will be created`);
   }
 
   const options: Database.Options = {};
@@ -30,20 +42,29 @@ export function createDatabase(config: DatabaseConfig = {}): Database.Database {
     options.verbose = console.log;
   }
 
-  const db = new Database(dbPath, options);
+  try {
+    const db = new Database(dbPath, options);
 
-  if (config.enableWAL !== false) {
-    db.pragma('journal_mode = WAL');
+    if (config.enableWAL !== false) {
+      db.pragma('journal_mode = WAL');
+    }
+
+    db.pragma('foreign_keys = ON');
+
+    console.log(`[Database] Successfully connected to database`);
+    return db;
+  } catch (error) {
+    console.error(`[Database] Failed to connect to database at ${dbPath}:`, error);
+    throw error;
   }
-
-  db.pragma('foreign_keys = ON');
-
-  return db;
 }
 
 export function getDatabase(): Database.Database {
   if (!dbInstance) {
+    console.log('[Database] No existing instance, creating new database connection');
     dbInstance = createDatabase();
+  } else {
+    console.log('[Database] Reusing existing database connection');
   }
   return dbInstance;
 }

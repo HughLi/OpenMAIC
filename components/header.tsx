@@ -11,6 +11,7 @@ import {
   FileDown,
   Package,
   Video,
+  Zap,
   CloudUpload,
   CheckCircle,
 } from 'lucide-react';
@@ -24,7 +25,10 @@ import { useStageStore } from '@/lib/store/stage';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useExportPPTX } from '@/lib/export/use-export-pptx';
 import { useExportVideo } from '@/lib/export/use-export-video';
+import { useExportVideoDirect } from '@/lib/export/use-export-video-direct';
 import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
+import { UserNav } from './user-nav';
+import { useAuth } from '@/lib/auth/auth-context';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
@@ -34,6 +38,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const { canGenerate } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -41,6 +46,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   // Export
   const { exporting: isExporting, exportPPTX, exportResourcePack } = useExportPPTX();
   const { exporting: isExportingVideo, exportVideo } = useExportVideo();
+  const { exporting: isExportingVideoDirect, exportVideo: exportVideoDirect, isSupported: isDirectSupported, progress: videoDirectProgress, status: videoDirectStatus } = useExportVideoDirect();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const scenes = useStageStore((s) => s.scenes);
@@ -49,7 +55,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const mediaTasks = useMediaGenerationStore((s) => s.tasks);
 
   // Sync/Publish
-  const { syncClassroom, isSyncing, syncStatus } = useClassroomSync();
+  const { syncWithMedia, isSyncing, syncStatus } = useClassroomSync();
   const stage = useStageStore((s) => s.stage);
 
   const canExport =
@@ -58,7 +64,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     failedOutlines.length === 0 &&
     Object.values(mediaTasks).every((task) => task.status === 'done' || task.status === 'failed');
 
-  const isAnyExporting = isExporting || isExportingVideo;
+  const isAnyExporting = isExporting || isExportingVideo || isExportingVideoDirect;
 
   // Handle publish/sync to server
   const handlePublish = async () => {
@@ -76,11 +82,12 @@ export function Header({ currentSceneTitle }: HeaderProps) {
     }
 
     try {
-      const result = await syncClassroom({
+      const result = await syncWithMedia({
         stage,
         scenes,
         ownerId: userId,
         visibility: 'public',
+        mediaFiles: [], // Audio files will be extracted from IndexedDB automatically
       });
 
       if (result.success) {
@@ -143,7 +150,9 @@ export function Header({ currentSceneTitle }: HeaderProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm shrink-0">
+        {/* Right side: Language, Theme, Settings, User */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm shrink-0">
           {/* Language Selector */}
           <div className="relative" ref={languageRef}>
             <button
@@ -153,7 +162,8 @@ export function Header({ currentSceneTitle }: HeaderProps) {
               }}
               className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
             >
-              {locale === 'zh-CN' ? 'CN' : 'EN'}
+              <span className="sm:hidden">{locale === 'zh-CN' ? '中' : 'EN'}</span>
+              <span className="hidden sm:inline">{locale === 'zh-CN' ? 'CN' : 'EN'}</span>
             </button>
             {languageOpen && (
               <div className="absolute top-full mt-2 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50 min-w-[120px]">
@@ -168,7 +178,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
                       'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                   )}
                 >
-                  简体中文
+                  {locale === 'zh-CN' ? '简体中文' : '中文'}
                 </button>
                 <button
                   onClick={() => {
@@ -181,7 +191,7 @@ export function Header({ currentSceneTitle }: HeaderProps) {
                       'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                   )}
                 >
-                  English
+                  {locale === 'zh-CN' ? '英文' : 'English'}
                 </button>
               </div>
             )}
@@ -261,35 +271,44 @@ export function Header({ currentSceneTitle }: HeaderProps) {
               <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
             </button>
           </div>
+
+          <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+
+          {/* User Nav */}
+          <UserNav />
+        </div>
         </div>
 
-        {/* Publish Button */}
-        <button
-          onClick={handlePublish}
-          disabled={!stage || isSyncing || scenes.length === 0}
-          title={isSyncing ? '发布中...' : '发布到服务器（包含音频）'}
-          className={cn(
-            'shrink-0 p-2 rounded-full transition-all flex items-center gap-1.5 px-3 text-sm font-medium',
-            stage && !isSyncing && scenes.length > 0
-              ? syncStatus === 'synced'
-                ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
-                : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
-              : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50',
-          )}
-        >
-          {isSyncing ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : syncStatus === 'synced' ? (
-            <CheckCircle className="w-4 h-4" />
-          ) : (
-            <CloudUpload className="w-4 h-4" />
-          )}
-          <span className="hidden sm:inline">
-            {isSyncing ? '发布中...' : syncStatus === 'synced' ? '已发布' : '发布'}
-          </span>
-        </button>
+        {/* Publish Button - Only for generators/admins */}
+        {canGenerate && (
+          <button
+            onClick={handlePublish}
+            disabled={!stage || isSyncing || scenes.length === 0}
+            title={isSyncing ? '发布中...' : '发布到服务器（包含音频）'}
+            className={cn(
+              'shrink-0 p-2 rounded-full transition-all flex items-center gap-1.5 px-3 text-sm font-medium',
+              stage && !isSyncing && scenes.length > 0
+                ? syncStatus === 'synced'
+                  ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+                  : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50',
+            )}
+          >
+            {isSyncing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : syncStatus === 'synced' ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : (
+              <CloudUpload className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">
+              {isSyncing ? '发布中...' : syncStatus === 'synced' ? '已发布' : '发布'}
+            </span>
+          </button>
+        )}
 
-        {/* Export Dropdown */}
+        {/* Export Dropdown - Only for generators/admins */}
+        {canGenerate && (
         <div className="relative" ref={exportRef}>
           <button
             onClick={() => {
@@ -346,6 +365,24 @@ export function Header({ currentSceneTitle }: HeaderProps) {
               <button
                 onClick={() => {
                   setExportMenuOpen(false);
+                  exportVideoDirect();
+                }}
+                disabled={!isDirectSupported}
+                className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Zap className="w-4 h-4 text-yellow-500 shrink-0" />
+                <div>
+                  <div>{t('export.videoFast') || '快速生成视频'}</div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {isDirectSupported
+                      ? (t('export.videoFastDesc') || '直接编码，速度更快 (5-10x)')
+                      : '需要 Chrome/Edge 94+'}
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setExportMenuOpen(false);
                   exportResourcePack();
                 }}
                 className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2.5"
@@ -361,7 +398,33 @@ export function Header({ currentSceneTitle }: HeaderProps) {
             </div>
           )}
         </div>
+        )}
       </header>
+      {/* Video Export Loading Overlay */}
+      {isExportingVideoDirect && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+              <h3 className="text-lg font-semibold">
+                {t('export.exporting') || '正在导出视频'}
+              </h3>
+            </div>
+            <div className="space-y-3">
+              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-purple-600 transition-all duration-300"
+                  style={{ width: `${videoDirectProgress}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                <span>{videoDirectStatus || t('export.processing')}</span>
+                <span>{`${videoDirectProgress}%`}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );

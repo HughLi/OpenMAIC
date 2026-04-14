@@ -66,6 +66,7 @@ export function createCategory(input: CreateCategoryInput): CreateCategoryResult
 
 export function getAllCategories(includeInactive = true): CourseCategory[] {
   const db = getDatabase();
+  console.log('[CategoryService] Getting categories, includeInactive:', includeInactive);
 
   let query = 'SELECT * FROM course_categories';
   if (!includeInactive) {

@@ -56,7 +56,8 @@ export function MainNav() {
           </nav>
         </div>
         <div className="flex flex-1 items-center justify-end space-x-2">
-          <UserNav />
+          {/* Hide UserNav on pages that have it in their own Header */}
+          {pathname !== '/' && !pathname?.startsWith('/generation-preview') && !pathname?.startsWith('/classroom/') && <UserNav />}
         </div>
       </div>
     </header>

@@ -148,7 +148,10 @@ export async function readClassroom(
 }
 
 // Get first slide from classroom (for thumbnail)
-export async function getClassroomFirstSlide(id: string): Promise<Slide | null> {
+export async function getClassroomFirstSlide(
+  id: string,
+  baseUrl?: string
+): Promise<Slide | null> {
   try {
     const classroom = await readClassroom(id);
     if (!classroom || !classroom.scenes || classroom.scenes.length === 0) {
@@ -165,11 +168,105 @@ export async function getClassroomFirstSlide(id: string): Promise<Slide | null> 
       return null;
     }
 
-    return firstSlideScene.content.canvas;
+    const slide = firstSlideScene.content.canvas;
+
+    // Resolve media placeholders (gen_img_*) to actual URLs if media files exist
+    const resolvedSlide = await resolveMediaPlaceholders(slide, id, baseUrl);
+
+    return resolvedSlide;
   } catch (error) {
     // Silently return null on error
+    console.error(`[getClassroomFirstSlide] Error for ${id}:`, error);
     return null;
   }
+}
+
+/**
+ * Resolve media placeholders (gen_img_*, gen_vid_*) to actual URLs
+ * Checks if media files exist on server and returns appropriate URLs
+ */
+async function resolveMediaPlaceholders(
+  slide: Slide,
+  classroomId: string,
+  baseUrl?: string
+): Promise<Slide> {
+  // Deep clone to avoid mutating original
+  const resolvedSlide: Slide = JSON.parse(JSON.stringify(slide));
+
+  if (!resolvedSlide.elements || resolvedSlide.elements.length === 0) {
+    return resolvedSlide;
+  }
+
+  for (const element of resolvedSlide.elements) {
+    // Check if element is an image or video with a placeholder src
+    if (
+      (element.type === 'image' || element.type === 'video') &&
+      element.src &&
+      /^gen_(img|vid)_[\w-]+$/i.test(element.src)
+    ) {
+      const mediaId = element.src;
+      const mediaUrl = await findMediaFile(classroomId, mediaId, baseUrl);
+
+      if (mediaUrl) {
+        element.src = mediaUrl;
+      } else {
+        // Clear placeholder if media not found - client will show skeleton
+        element.src = '';
+      }
+    }
+  }
+
+  return resolvedSlide;
+}
+
+/**
+ * Find media file for a classroom and return its URL
+ * Checks both legacy path (media/classroomId/) and new path (classroomId/media/)
+ */
+async function findMediaFile(
+  classroomId: string,
+  mediaId: string,
+  baseUrl?: string
+): Promise<string | null> {
+  const extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.webm'];
+
+  // Check legacy media directory: data/classrooms/media/{classroomId}/{mediaId}.{ext}
+  for (const ext of extensions) {
+    const legacyPath = path.join(CLASSROOM_MEDIA_DIR, classroomId, `${mediaId}${ext}`);
+    try {
+      await fs.access(legacyPath);
+      const urlBase = baseUrl || '';
+      return `${urlBase}/api/classroom-media/${classroomId}/media/${mediaId}${ext}`;
+    } catch {
+      // File doesn't exist, try next
+    }
+  }
+
+  // Check new isolated storage: data/classrooms/{ownerId}/{classroomId}/media/{mediaId}.{ext}
+  // We need to find the ownerId first by looking at classroom metadata
+  try {
+    const db = getDatabase();
+    const row = db.prepare('SELECT owner_id FROM classrooms WHERE id = ?').get(classroomId) as
+      | { owner_id: string }
+      | undefined;
+
+    if (row) {
+      for (const ext of extensions) {
+        const newPath = path.join(CLASSROOMS_DIR, row.owner_id, classroomId, 'media', `${mediaId}${ext}`);
+        try {
+          await fs.access(newPath);
+          const urlBase = baseUrl || '';
+          return `${urlBase}/api/classroom-media/${classroomId}/media/${mediaId}${ext}`;
+        } catch {
+          // File doesn't exist, try next
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[findMediaFile] Database error for ${classroomId}:`, error);
+  }
+
+  return null;
 }
 
 // Persist classroom data to file system

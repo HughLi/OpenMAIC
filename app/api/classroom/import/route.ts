@@ -4,8 +4,16 @@ import { saveClassroomMetadata, persistClassroom, ensureClassroomsDir } from '@/
 import { createUserClassroom } from '@/lib/server/user-classroom-service';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
 import { createLogger } from '@/lib/logger';
+import path from 'path';
 
 const log = createLogger('ClassroomImport');
+
+// Debug database path
+const projectRoot = process.env.PROJECT_ROOT || (process.cwd().includes('.next/standalone')
+  ? path.resolve(process.cwd(), '..', '..')
+  : process.cwd());
+const dbPath = process.env.DATABASE_PATH || path.join(projectRoot, 'data', 'database', 'openmaic.db');
+log.info(`[ClassroomImport] Database path: ${dbPath}, cwd: ${process.cwd()}`);
 
 // Auth middleware
 async function requireAuth(request: NextRequest): Promise<AccessTokenPayload | Response> {
@@ -121,7 +129,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         log.error(`Failed to import ${data.name || data.id}:`, err);
-        results.errors.push(`Failed to import ${data.name || data.id}: ${errorMsg}`);
+        results.errors.push(`Failed to import ${data.name || data.id}: ${errorMsg} (db: ${dbPath})`);
       }
     }
 

@@ -2,7 +2,7 @@ import { type NextRequest } from 'next/server';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { getDatabase } from '@/server/database';
 import { verifyToken, AccessTokenPayload } from '@/server/auth/jwt';
-import { getClassroomFirstSlide } from '@/lib/server/classroom-service';
+import { getClassroomFirstSlide, buildRequestOrigin } from '@/lib/server/classroom-service';
 
 // Auth middleware - requires admin role
 async function requireAdmin(request: NextRequest): Promise<AccessTokenPayload | Response> {
@@ -69,7 +69,22 @@ export async function GET(request: NextRequest) {
 
     query += ' ORDER BY c.updated_at DESC';
 
-    const classrooms = db.prepare(query).all(...params) as Array<{
+    console.log('[Admin Courses API] Executing query:', query, 'params:', params);
+
+    const classroomsRaw = db.prepare(query).all(...params);
+
+    // Validate classrooms is an array
+    if (!Array.isArray(classroomsRaw)) {
+      console.error('[Admin Courses API] Query did not return an array:', classroomsRaw);
+      return apiError(
+        API_ERROR_CODES.INTERNAL_ERROR,
+        500,
+        'Invalid database response',
+        'Query result is not an array',
+      );
+    }
+
+    const classrooms = classroomsRaw as Array<{
       id: string;
       owner_id: string;
       title: string;
@@ -84,16 +99,43 @@ export async function GET(request: NextRequest) {
       owner_name: string;
     }>;
 
+    console.log(`[Admin Courses API] Found ${classrooms.length} classrooms`);
+
+    // Build base URL for media resolution
+    const baseUrl = buildRequestOrigin(request);
+
     // Load first slide for each classroom (for thumbnails) - same as /api/courses
-    const classroomsWithSlides = await Promise.all(
-      classrooms.map(async (classroom) => {
-        const firstSlide = await getClassroomFirstSlide(classroom.id);
-        return {
-          ...classroom,
-          firstSlide,
-        };
-      })
-    );
+    let classroomsWithSlides;
+    try {
+      classroomsWithSlides = await Promise.all(
+        classrooms.map(async (classroom, index) => {
+          try {
+            // Validate classroom id
+            if (!classroom?.id) {
+              console.error(`[Admin Courses API] Invalid classroom at index ${index}:`, classroom);
+              return {
+                ...classroom,
+                firstSlide: null,
+              };
+            }
+            const firstSlide = await getClassroomFirstSlide(classroom.id, baseUrl);
+            return {
+              ...classroom,
+              firstSlide,
+            };
+          } catch (slideError) {
+            console.error(`[Admin Courses API] Error loading first slide for ${classroom?.id}:`, slideError);
+            return {
+              ...classroom,
+              firstSlide: null,
+            };
+          }
+        })
+      );
+    } catch (promiseError) {
+      console.error('[Admin Courses API] Error in Promise.all:', promiseError);
+      throw promiseError;
+    }
 
     // Transform to Course format
     const courses = classroomsWithSlides.map(classroom => ({
@@ -118,6 +160,7 @@ export async function GET(request: NextRequest) {
     }));
 
     // Get stats (exclude deleted courses)
+    console.log('[Admin Courses API] Getting stats...');
     const stats = db.prepare(`
       SELECT
         COUNT(*) as total_courses,
@@ -125,6 +168,8 @@ export async function GET(request: NextRequest) {
       FROM classrooms
       WHERE status != 'deleted'
     `).get() as { total_courses: number; active_courses: number };
+
+    console.log('[Admin Courses API] Stats:', stats);
 
     return apiSuccess({
       courses,
@@ -134,6 +179,10 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error('[Admin Courses API] Error:', error);
+    if (error instanceof Error) {
+      console.error('[Admin Courses API] Stack:', error.stack);
+    }
     return apiError(
       API_ERROR_CODES.INTERNAL_ERROR,
       500,

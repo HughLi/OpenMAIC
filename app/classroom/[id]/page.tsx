@@ -12,8 +12,11 @@ import { useWhiteboardHistoryStore } from '@/lib/store/whiteboard-history';
 import { createLogger } from '@/lib/logger';
 import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
+import { db } from '@/lib/utils/database';
 import { useClassroomSync } from '@/lib/hooks/use-classroom-sync';
 import type { Scene } from '@/lib/types/stage';
+import type { SpeechAction } from '@/lib/types/action';
+import { processAudioUrls } from '@/lib/audio/audio-storage';
 
 const log = createLogger('Classroom');
 
@@ -30,7 +33,7 @@ export default function ClassroomDetailPage() {
   const syncedToDatabaseRef = useRef(false);
 
   // Use new classroom sync hook
-  const { syncClassroom, syncStatus, isSyncing } = useClassroomSync();
+  const { syncClassroom, syncWithMedia, syncStatus, isSyncing } = useClassroomSync();
 
   const { generateRemaining, retrySingleOutline, stop } = useSceneGenerator({
     onComplete: async () => {
@@ -49,11 +52,12 @@ export default function ClassroomDetailPage() {
           return;
         }
 
-        // Use new sync hook to sync complete classroom data
-        const result = await syncClassroom({
+        // Use new sync hook to sync complete classroom data (including audio)
+        const result = await syncWithMedia({
           stage,
           scenes,
           ownerId: 'anonymous', // TODO: Get actual user ID from auth context
+          mediaFiles: [], // No media files to sync, audio is handled separately
         });
 
         if (result.success) {
@@ -80,23 +84,24 @@ export default function ClassroomDetailPage() {
       
       await loadFromStorage(classroomId);
 
-      // Always update audio URLs to server endpoint after loading
-      // This ensures audio works for students even if IndexedDB has stale data
+      // Update audio URLs to server endpoint only if audio is NOT in IndexedDB
+      // Client-generated courses store audio in IndexedDB, server-generated use server URLs
       const stateAfterLoad = useStageStore.getState();
       if (stateAfterLoad.scenes.length > 0) {
-        const updatedScenes = stateAfterLoad.scenes.map((scene: Scene) => ({
-          ...scene,
-          actions: scene.actions?.map((action) => {
-            if (action.type === 'speech' && action.audioId) {
-              return {
-                ...action,
-                audioUrl: `/api/classroom/audio?classroomId=${classroomId}&audioId=${action.audioId}`,
-              };
-            }
-            return action;
-          }),
-        }));
-        useStageStore.setState({ scenes: updatedScenes });
+        // Check which audio files exist in IndexedDB
+        const audioIds = stateAfterLoad.scenes.flatMap((scene: Scene) =>
+          scene.actions
+            ?.filter((a) => a.type === 'speech' && (a as SpeechAction).audioId)
+            .map((a) => (a as SpeechAction).audioId!) || []
+        );
+        log.info(`[Audio] Checking ${audioIds.length} audio IDs in IndexedDB:`, audioIds.slice(0, 5));
+
+        // Process audio URLs based on storage source setting
+        const { useSettingsStore: getSettingsStore } = await import('@/lib/store/settings');
+        const { audioStorageSource } = getSettingsStore.getState();
+        const processedScenes = await processAudioUrls(stateAfterLoad.scenes, audioStorageSource);
+        log.info(`[Audio] Processed with storage source: ${audioStorageSource}`);
+        useStageStore.setState({ scenes: processedScenes });
       }
 
       // If IndexedDB had no data, try server-side storage (API-generated classrooms)

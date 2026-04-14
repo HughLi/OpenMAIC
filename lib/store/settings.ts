@@ -146,6 +146,9 @@ export interface SettingsState {
   autoPlayLecture: boolean;
   playbackSpeed: PlaybackSpeed;
 
+  // Audio storage source (IndexedDB vs Server)
+  audioStorageSource: 'indexeddb' | 'server';
+
   // Agent settings
   selectedAgentIds: string[];
   maxTurns: string;
@@ -166,6 +169,7 @@ export interface SettingsState {
   setTTSVolume: (volume: number) => void;
   setAutoPlayLecture: (autoPlay: boolean) => void;
   setPlaybackSpeed: (speed: PlaybackSpeed) => void;
+  setAudioStorageSource: (source: 'indexeddb' | 'server') => void;
   setSelectedAgentIds: (ids: string[]) => void;
   setMaxTurns: (turns: string) => void;
   setAgentMode: (mode: 'preset' | 'auto') => void;
@@ -552,6 +556,7 @@ export const useSettingsStore = create<SettingsState>()(
         ttsVolume: 1,
         autoPlayLecture: false,
         playbackSpeed: 1,
+        audioStorageSource: 'indexeddb' as const,
 
         // Layout preferences
         sidebarCollapsed: true,
@@ -608,6 +613,8 @@ export const useSettingsStore = create<SettingsState>()(
         setAutoPlayLecture: (autoPlay) => set({ autoPlayLecture: autoPlay }),
 
         setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
+
+        setAudioStorageSource: (source) => set({ audioStorageSource: source }),
 
         setSelectedAgentIds: (ids) => set({ selectedAgentIds: ids }),
 
@@ -1314,6 +1321,12 @@ export const useSettingsStore = create<SettingsState>()(
         if ((state as Record<string, unknown>).autoAgentCount === undefined) {
           (state as Record<string, unknown>).autoAgentCount = 3;
         }
+
+        // Add default audioStorageSource if missing
+        if ((state as Record<string, unknown>).audioStorageSource === undefined) {
+          (state as Record<string, unknown>).audioStorageSource = 'indexeddb';
+        }
+
 
         // Migrate Web Search: old flat fields → new provider-based config
         if (!state.webSearchProvidersConfig) {

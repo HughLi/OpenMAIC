@@ -48,6 +48,8 @@ import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useSettingsDialogStore } from '@/lib/store/settings-dialog';
 import { useUserClassroomsSync } from '@/lib/hooks/use-user-classrooms-sync';
+import { useAuth } from '@/lib/auth/auth-context';
+import { UserNav } from '@/components/user-nav';
 
 const log = createLogger('Home');
 
@@ -73,6 +75,7 @@ function HomePage() {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const { user, canGenerate: userCanGenerate } = useAuth();
   const [form, setForm] = useState<FormState>(initialFormState);
   const { isOpen: settingsOpen, closeDialog: closeSettings, section: settingsSection, openDialog: openSettings, setSection: setSettingsSection } = useSettingsDialogStore();
 
@@ -133,84 +136,6 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Draggable toolbar state
-  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isDraggingToolbar, setIsDraggingToolbar] = useState(false);
-  const toolbarDragStart = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
-
-  // Draggable toolbar handlers
-  const handleToolbarMouseDown = (e: React.MouseEvent) => {
-    // Don't drag if clicking on buttons or dropdowns
-    if ((e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('[data-drag-handle]')) return;
-    e.preventDefault();
-    setIsDraggingToolbar(true);
-    toolbarDragStart.current = {
-      x: e.clientX,
-      y: e.clientY,
-      startX: toolbarPos.x,
-      startY: toolbarPos.y,
-    };
-  };
-
-  const handleToolbarTouchStart = (e: React.TouchEvent) => {
-    if ((e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('[data-drag-handle]')) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    setIsDraggingToolbar(true);
-    toolbarDragStart.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      startX: toolbarPos.x,
-      startY: toolbarPos.y,
-    };
-  };
-
-  useEffect(() => {
-    if (!isDraggingToolbar) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!toolbarDragStart.current) return;
-      const deltaX = e.clientX - toolbarDragStart.current.x;
-      const deltaY = e.clientY - toolbarDragStart.current.y;
-
-      // Limit movement to keep within viewport
-      const newX = Math.max(-window.innerWidth + 100, Math.min(toolbarDragStart.current.startX + deltaX, window.innerWidth - 16));
-      const newY = Math.max(0, Math.min(toolbarDragStart.current.startY + deltaY, window.innerHeight - 50));
-
-      setToolbarPos({ x: newX, y: newY });
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!toolbarDragStart.current) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const deltaX = touch.clientX - toolbarDragStart.current.x;
-      const deltaY = touch.clientY - toolbarDragStart.current.y;
-
-      const newX = Math.max(-window.innerWidth + 100, Math.min(toolbarDragStart.current.startX + deltaX, window.innerWidth - 16));
-      const newY = Math.max(0, Math.min(toolbarDragStart.current.startY + deltaY, window.innerHeight - 50));
-
-      setToolbarPos({ x: newX, y: newY });
-    };
-
-    const handleEnd = () => {
-      setIsDraggingToolbar(false);
-      toolbarDragStart.current = null;
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleEnd);
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleEnd);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleEnd);
-    };
-  }, [isDraggingToolbar]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -415,17 +340,7 @@ function HomePage() {
       {/* ═══ Draggable Top-right pill ═══ */}
       <div
         ref={toolbarRef}
-        data-drag-handle
-        onMouseDown={handleToolbarMouseDown}
-        onTouchStart={handleToolbarTouchStart}
-        className={cn(
-          "fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm select-none",
-          isDraggingToolbar ? "cursor-grabbing scale-105" : "cursor-grab"
-        )}
-        style={{
-          transform: `translate(${toolbarPos.x}px, ${toolbarPos.y}px)`,
-          transition: isDraggingToolbar ? "none" : "transform 0.1s ease-out",
-        }}
+        className="fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm select-none"
       >
         {/* Language Selector */}
         <div className="relative">
@@ -452,7 +367,7 @@ function HomePage() {
                     'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                 )}
               >
-                简体中文
+                {locale === 'zh-CN' ? '简体中文' : '中文'}
               </button>
               <button
                 onClick={() => {
@@ -465,7 +380,7 @@ function HomePage() {
                     'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                 )}
               >
-                English
+                {locale === 'zh-CN' ? '英文' : 'English'}
               </button>
             </div>
           )}
@@ -534,17 +449,25 @@ function HomePage() {
           )}
         </div>
 
+        {/* Settings Button - Only for generators/admins */}
+        {userCanGenerate && (
+          <>
+            <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+            <div className="relative">
+              <button
+                onClick={() => openSettings(undefined)}
+                className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
+              >
+                <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
+              </button>
+            </div>
+          </>
+        )}
+
         <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
 
-        {/* Settings Button */}
-        <div className="relative">
-          <button
-            onClick={() => openSettings(undefined)}
-            className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
-          >
-            <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
-          </button>
-        </div>
+        {/* User Nav */}
+        <UserNav />
       </div>
       <SettingsDialog
         open={settingsOpen}
@@ -601,80 +524,82 @@ function HomePage() {
           {t('home.slogan')}
         </motion.p>
 
-        {/* ── Unified input area ── */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.35 }}
-          className="w-full"
-        >
-          <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
-            {/* ── Greeting + Profile + Agents ── */}
-            <div className="relative z-20 flex items-start justify-between">
-              <GreetingBar />
-              <div className="pr-3 pt-3.5 shrink-0">
-                <AgentBar />
-              </div>
-            </div>
-
-            {/* Textarea */}
-            <textarea
-              ref={textareaRef}
-              placeholder={t('upload.requirementPlaceholder')}
-              className="w-full resize-none border-0 bg-transparent px-4 pt-1 pb-2 text-[13px] leading-relaxed placeholder:text-muted-foreground/40 focus:outline-none min-h-[140px] max-h-[300px]"
-              value={form.requirement}
-              onChange={(e) => updateForm('requirement', e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={4}
-            />
-
-            {/* Toolbar row */}
-            <div className="px-3 pb-3 flex items-end gap-2">
-              <div className="flex-1 min-w-0">
-                <GenerationToolbar
-                  language={form.language}
-                  onLanguageChange={(lang) => updateForm('language', lang)}
-                  webSearch={form.webSearch}
-                  onWebSearchChange={(v) => updateForm('webSearch', v)}
-                  onSettingsOpen={(section) => {
-                    setSettingsSection(section);
-                    openSettings('providers');
-                  }}
-                  pdfFile={form.pdfFile}
-                  onPdfFileChange={(f) => updateForm('pdfFile', f)}
-                  onPdfError={setError}
-                />
+        {/* ── Unified input area ── Only show for generators/admins -- */}
+        {userCanGenerate && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.35 }}
+            className="w-full"
+          >
+            <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
+              {/* ── Greeting + Profile + Agents ── */}
+              <div className="relative z-20 flex items-start justify-between">
+                <GreetingBar />
+                <div className="pr-3 pt-3.5 shrink-0">
+                  <AgentBar />
+                </div>
               </div>
 
-              {/* Voice input */}
-              <SpeechButton
-                size="md"
-                onTranscription={(text) => {
-                  setForm((prev) => {
-                    const next = prev.requirement + (prev.requirement ? ' ' : '') + text;
-                    updateRequirementCache(next);
-                    return { ...prev, requirement: next };
-                  });
-                }}
+              {/* Textarea */}
+              <textarea
+                ref={textareaRef}
+                placeholder={t('upload.requirementPlaceholder')}
+                className="w-full resize-none border-0 bg-transparent px-4 pt-1 pb-2 text-[13px] leading-relaxed placeholder:text-muted-foreground/40 focus:outline-none min-h-[140px] max-h-[300px]"
+                value={form.requirement}
+                onChange={(e) => updateForm('requirement', e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={4}
               />
 
-              {/* Send button */}
-              <button
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-                className={cn(
-                  'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3',
-                  canGenerate
-                    ? 'bg-primary text-primary-foreground hover:opacity-90 shadow-sm cursor-pointer'
-                    : 'bg-muted text-muted-foreground/40 cursor-not-allowed',
-                )}
-              >
-                <span className="text-xs font-medium">{t('toolbar.enterClassroom')}</span>
-                <ArrowUp className="size-3.5" />
-              </button>
+              {/* Toolbar row */}
+              <div className="px-3 pb-3 flex items-end gap-2">
+                <div className="flex-1 min-w-0">
+                  <GenerationToolbar
+                    language={form.language}
+                    onLanguageChange={(lang) => updateForm('language', lang)}
+                    webSearch={form.webSearch}
+                    onWebSearchChange={(v) => updateForm('webSearch', v)}
+                    onSettingsOpen={(section) => {
+                      setSettingsSection(section);
+                      openSettings('providers');
+                    }}
+                    pdfFile={form.pdfFile}
+                    onPdfFileChange={(f) => updateForm('pdfFile', f)}
+                    onPdfError={setError}
+                  />
+                </div>
+
+                {/* Voice input */}
+                <SpeechButton
+                  size="md"
+                  onTranscription={(text) => {
+                    setForm((prev) => {
+                      const next = prev.requirement + (prev.requirement ? ' ' : '') + text;
+                      updateRequirementCache(next);
+                      return { ...prev, requirement: next };
+                    });
+                  }}
+                />
+
+                {/* Send button */}
+                <button
+                  onClick={handleGenerate}
+                  disabled={!canGenerate}
+                  className={cn(
+                    'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3',
+                    canGenerate
+                      ? 'bg-primary text-primary-foreground hover:opacity-90 shadow-sm cursor-pointer'
+                      : 'bg-muted text-muted-foreground/40 cursor-not-allowed',
+                  )}
+                >
+                  <span className="text-xs font-medium">{t('toolbar.enterClassroom')}</span>
+                  <ArrowUp className="size-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
-        </motion.div>
+          </motion.div>
+        )}
 
         {/* ── Error ── */}
         <AnimatePresence>

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
 import {
@@ -89,6 +90,10 @@ export function AudioSettings({ onSave }: AudioSettingsProps = {}) {
   const setTTSEnabled = useSettingsStore((state) => state.setTTSEnabled);
   const setASREnabled = useSettingsStore((state) => state.setASREnabled);
 
+  // Audio storage source state
+  const audioStorageSource = useSettingsStore((state) => state.audioStorageSource);
+  const setAudioStorageSource = useSettingsStore((state) => state.setAudioStorageSource);
+
   const ttsProvider = TTS_PROVIDERS[ttsProviderId] ?? TTS_PROVIDERS['openai-tts'];
 
   // Azure voices - load from static JSON
@@ -123,6 +128,11 @@ export function AudioSettings({ onSave }: AudioSettingsProps = {}) {
     config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean }>,
   ) => {
     setASRProviderConfig(providerId, config);
+    onSave?.();
+  };
+
+  const handleAudioStorageSourceChange = (source: 'indexeddb' | 'server') => {
+    setAudioStorageSource(source);
     onSave?.();
   };
 
@@ -372,6 +382,38 @@ export function AudioSettings({ onSave }: AudioSettingsProps = {}) {
 
   return (
     <div className="space-y-6 max-w-4xl">
+      {/* Audio Storage Source Section */}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">{t('settings.audioStorageSource')}</Label>
+          <p className="text-xs text-muted-foreground">{t('settings.audioStorageSourceDescription')}</p>
+        </div>
+        <RadioGroup
+          value={audioStorageSource}
+          onValueChange={(value) => handleAudioStorageSourceChange(value as 'indexeddb' | 'server')}
+          className="grid gap-3"
+        >
+          <div className="flex items-start space-x-3 space-y-0 rounded-md border p-4">
+            <RadioGroupItem value="indexeddb" id="storage-indexeddb" />
+            <div className="space-y-1 leading-none">
+              <Label htmlFor="storage-indexeddb" className="text-sm font-medium cursor-pointer">
+                {t('settings.storageIndexedDB')}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t('settings.storageIndexedDBDescription')}</p>
+            </div>
+          </div>
+          <div className="flex items-start space-x-3 space-y-0 rounded-md border p-4">
+            <RadioGroupItem value="server" id="storage-server" />
+            <div className="space-y-1 leading-none">
+              <Label htmlFor="storage-server" className="text-sm font-medium cursor-pointer">
+                {t('settings.storageServer')}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t('settings.storageServerDescription')}</p>
+            </div>
+          </div>
+        </RadioGroup>
+      </div>
+
       {/* TTS Section */}
       <div className="space-y-4">
         <div

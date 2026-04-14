@@ -44,7 +44,10 @@ export async function POST(request: NextRequest) {
         return apiError('INVALID_REQUEST', 400, 'Invalid action');
     }
   } catch (error) {
-    console.error('Auth error:', error);
+    console.error('[Auth API] Error:', error);
+    if (error instanceof Error) {
+      console.error('[Auth API] Stack:', error.stack);
+    }
     return apiError('INTERNAL_ERROR', 500, 'Authentication failed');
   }
 }
@@ -107,7 +110,10 @@ async function handleLogin({ username, password }: { username: string; password:
     return apiError('MISSING_REQUIRED_FIELD', 400, 'Username and password are required');
   }
 
+  console.log('[Auth API] Login attempt:', { username, cwd: process.cwd() });
+
   const db = getDatabase();
+  console.log('[Auth API] Database connected');
   const user = db.prepare(
     'SELECT * FROM users WHERE username = ? OR email = ?'
   ).get(username, username) as DbUser | undefined;
